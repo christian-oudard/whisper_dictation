@@ -1,0 +1,30 @@
+# Voice Typing
+
+Whisper-based voice dictation for Linux/Wayland.
+
+## Install
+
+$ sudo pacman -S wtype
+$ uv tool install .
+
+## Usage
+
+Bind `whisper-dictation-toggle` to a key in your Sway config:
+
+    bindsym XF86Favorites exec whisper-dictation-toggle
+
+- First press: loads model (yellow status), then starts recording (red status)
+- Second press: stops recording, transcribes, types result
+- Subsequent presses: instant toggle (model stays loaded)
+
+## How it works
+
+- `whisper-dictation-daemon`: background process that keeps the Whisper model in VRAM
+- `whisper-dictation-toggle`: starts daemon if needed, toggles recording via signal
+
+The daemon stays running after first use for instant recording on subsequent toggles.
+It auto-shuts down after 5 minutes idle to free VRAM.
+
+## Stop daemon manually
+
+$ pkill -f whisper-dictation-daemon
