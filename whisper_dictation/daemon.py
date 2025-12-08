@@ -10,7 +10,7 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 
 SAMPLE_RATE = 16000
-MODEL = "deepdml/faster-whisper-large-v3-turbo-ct2"
+MODEL = "tiny.en"
 PID_FILE = "/tmp/whisper-dictation-daemon.pid"
 STATUS_FILE = "/tmp/nerd-dictation-status"
 STATUS_LOADING = '<span color="#fabd2f">● LOAD</span>'
@@ -68,6 +68,7 @@ def main():
             stream.close()
             stream = None
         set_status("")
+        signal.alarm(IDLE_TIMEOUT)  # Start idle timeout
 
         if not audio_chunks:
             print("No audio.", file=sys.stderr)
@@ -82,8 +83,6 @@ def main():
         if text:
             subprocess.run(["wtype", "--", text], check=False)
             print(f"Typed: {text}", file=sys.stderr)
-
-        signal.alarm(IDLE_TIMEOUT)  # Start idle timeout
 
     def toggle(sig, frame):
         nonlocal recording
