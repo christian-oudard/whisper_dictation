@@ -15,7 +15,7 @@ PID_FILE = "/tmp/whisper-dictation-daemon.pid"
 STATUS_FILE = "/tmp/nerd-dictation-status"
 STATUS_LOADING = '<span color="#fabd2f">● LOAD</span>'
 STATUS_REC = '<span color="#fb4934">● REC</span>'
-IDLE_TIMEOUT = 5 * 60  # 5 minutes
+IDLE_TIMEOUT = 15 * 60  # 15 minutes
 
 
 def set_status(status: str):
