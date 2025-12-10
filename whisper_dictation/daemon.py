@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Whisper daemon - keeps model loaded, toggles recording on signal."""
 
+import os
 import signal
 import subprocess
 import sys
-import os
-import numpy as np
-import sounddevice as sd
-from faster_whisper import WhisperModel
 
-SAMPLE_RATE = 16000
+
 MODEL = "tiny.en"
+SAMPLE_RATE = 16000
 PID_FILE = "/tmp/whisper-dictation-daemon.pid"
 STATUS_FILE = "/tmp/nerd-dictation-status"
 STATUS_LOADING = '<span color="#fabd2f">● LOAD</span>'
@@ -27,11 +25,16 @@ def set_status(status: str):
 
 
 def main():
-    # Write PID file
+    # Write PID and show loading status before heavy imports
     with open(PID_FILE, "w") as f:
         f.write(str(os.getpid()))
-
     set_status(STATUS_LOADING)
+
+    # Heavy imports
+    import numpy as np
+    import sounddevice as sd
+    from faster_whisper import WhisperModel
+
     print(f"Loading {MODEL}...", file=sys.stderr)
     model = WhisperModel(MODEL, device="cuda", compute_type="float16")
     print("Model loaded.", file=sys.stderr)
