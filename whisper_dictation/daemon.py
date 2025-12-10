@@ -42,34 +42,32 @@ def main():
     # State
     recording = False
     audio_chunks = []
-    stream = None
 
     def audio_callback(indata, frames, time_info, status):
         if recording:
             audio_chunks.append(indata[:, 0].copy())
 
+    # Pre-create stream to eliminate device init latency on toggle
+    stream = sd.InputStream(
+        samplerate=SAMPLE_RATE,
+        channels=1,
+        dtype=np.float32,
+        callback=audio_callback,
+    )
+
     def start_recording():
-        nonlocal recording, audio_chunks, stream
+        nonlocal recording, audio_chunks
         signal.alarm(0)  # Cancel any pending timeout
         audio_chunks = []
-        stream = sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=1,
-            dtype=np.float32,
-            callback=audio_callback,
-        )
         stream.start()
         recording = True
         set_status(STATUS_REC)
         print("Recording...", file=sys.stderr)
 
     def stop_recording():
-        nonlocal recording, stream
+        nonlocal recording
         recording = False
-        if stream:
-            stream.stop()
-            stream.close()
-            stream = None
+        stream.stop()
         set_status("")
         signal.alarm(IDLE_TIMEOUT)  # Start idle timeout
 
@@ -98,6 +96,8 @@ def main():
         nonlocal recording
         if recording:
             stop_recording()
+        stream.stop()
+        stream.close()
         try:
             os.unlink(PID_FILE)
         except OSError:
