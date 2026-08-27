@@ -72,6 +72,13 @@ The language of the recording.
 .B \-lang list
 prints what each pipeline takes.
 .TP
+.BI \-s " n" ", " \-speakers " n"
+How many people are in the recording, when that is known. Only the entries
+with a clustering diarizer take it; the rest are built around a fixed number
+of speakers and refuse it rather than ignoring it. Worth giving: the estimate
+cannot tell one person recorded two ways from two people, and on three voices
+it has split one of them in two.
+.TP
 .BI \-chunk " duration"
 The longest piece to transcribe at once. The default is what the pipeline can
 hold.

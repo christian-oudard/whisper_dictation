@@ -23,6 +23,8 @@ var commands = []command{
 	{"toggle", "", "Start or stop recording.", runToggle, false},
 	{"repeat", "", "Repeat the last transcription, typing the text again.", runRepeat, false},
 	{"model", "[<model>]", "List, switch, or fetch voice transcription models.", runModel, false},
+	{"transcribe", "<recording>", "Transcribe a recording into a document with speaker labels.", runTranscribe, false},
+	{"tx-model", "[<pipeline>]", "List, choose, or fetch speaker-labelled transcription models.", runTxModel, false},
 	{"version", "", "Report the build, and whether the daemon matches it.", runVersion, false},
 	{"doctor", "", "Report this machine, for a bug report.", runDoctor, true},
 }
@@ -67,6 +69,8 @@ func usage(w *os.File) {
 		if c.hidden {
 			continue
 		}
-		fmt.Fprintf(w, "  %-7s %-30s %s\n", c.name, c.usage, c.summary)
+		// Wide enough for "transcribe" and "[<pipeline>]", which are the
+		// longest of each column.
+		fmt.Fprintf(w, "  %-10s %-16s %s\n", c.name, c.usage, c.summary)
 	}
 }

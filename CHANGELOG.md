@@ -50,7 +50,13 @@ after which downloading a model changed nothing.
 ### Transcribing recordings
 
 `diktat transcribe` turns a recording into a markdown document with speaker
-labels. Any format ffmpeg reads goes in. Cuts fall in the quietest moment near
+labels. One entry clusters speaker embeddings rather than working to a fixed
+cap, so a recording of more than four people is a document about more than
+four people; it runs a voice activity detector first, because loudness cannot
+tell a voice from a chair. `-s` says how many people are in the room when you
+know, which the clustering takes as given rather than estimating -- worth
+giving, since the estimate cannot tell one person recorded two ways from two
+people. Any format ffmpeg reads goes in. Cuts fall in the quietest moment near
 the limit rather than at a fixed offset, speakers are attributed per word
 rather than per segment, and paragraphs break where the speaker paused after
 finishing a sentence. The turns are saved beside the document, so changing how
@@ -74,10 +80,12 @@ with a speaker count where you know it.
 
 The fix is a voice activity detector, which is a model rather than a threshold:
 seven repairs that were not models were measured and none worked. One is now
-ported in transcribe.cpp and not yet reachable from here; on those same four
-meetings it fixes three of the counts and costs the fourth its sparsest
-speaker, 25 seconds in 14 minutes. The numbers are in transcribe.cpp's
-`docs/diarization.md`.
+ported in transcribe.cpp and not yet reachable from here. On those same four
+meetings its regions improve speaker confusion on every one and fix the count
+on two of the three that were over; the third keeps its extra cluster, and a
+fourth meeting returns three speakers because one of its four talks for 19.5
+seconds in 13.6 minutes and has never been resolved here, with the detector or
+without it. The numbers are in transcribe.cpp's `docs/diarization.md`.
 
 **Overlapping speech is attributed to one speaker.** In published diarization
 numbers overlap costs about twenty points against one or two for the choice of

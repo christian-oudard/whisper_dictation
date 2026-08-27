@@ -49,6 +49,32 @@ func StartModel() string {
 	return models.Default
 }
 
+// txPath holds the pipeline chosen by the last `diktat tx-model`. A second
+// file rather than a second line in the first: the two choices are unrelated,
+// nothing reads both, and one that outlives its menu entry should not take the
+// other down with it.
+func txPath() string { return filepath.Join(xdg.StateDir(), "tx-model") }
+
+// TxModel is the pipeline chosen for transcribing recordings, or the default
+// when nothing has been chosen. There is no config-file key behind this the
+// way there is for the dictation model: that one is read by a daemon that
+// starts before anyone can choose, and this one by a command someone ran.
+func TxModel() string {
+	raw, err := os.ReadFile(txPath())
+	if err != nil {
+		return models.DefaultDiarizer
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+// SelectTx records a pipeline as the one to transcribe recordings with.
+func SelectTx(name string) error {
+	if err := os.MkdirAll(xdg.StateDir(), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(txPath(), []byte(name+"\n"), 0644)
+}
+
 // Select records a model as the one to start with from now on. A failure to
 // write is not worth failing the switch over: the model still changes, it
 // just will not be remembered, so callers report it and carry on.

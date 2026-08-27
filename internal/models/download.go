@@ -34,6 +34,9 @@ func download(spec Spec, progress io.Writer) (string, error) {
 	}
 	dest := spec.Path()
 	url := fmt.Sprintf("%s/%s-gguf/resolve/main/%s%s", hfOrg, spec.Name, dir(spec), spec.File())
+	if e, ok := elsewhere[spec.Name]; ok {
+		url = fmt.Sprintf("https://huggingface.co/%s/resolve/main/%s", e.repo, e.file)
+	}
 	return dest, get(url, dest, progress)
 }
 

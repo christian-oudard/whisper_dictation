@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	transcribe "github.com/handy-computer/transcribe.cpp/bindings/go"
+
 	"github.com/christian-oudard/diktat/internal/asr"
 	"github.com/christian-oudard/diktat/internal/audio"
 	"github.com/christian-oudard/diktat/internal/human"
@@ -29,9 +31,27 @@ import (
 	"github.com/christian-oudard/diktat/internal/wav"
 )
 
+// transcribeWith runs the daemon's own call, or the same with punctuation
+// asked for. The default is what the daemon does, since that is what this
+// tool exists to measure; the flag is here because the family defaults differ
+// and the difference is not cosmetic. parakeet-tdt-0.6b-v2 punctuates
+// unasked and parakeet-tdt-1.1b returns none, which decides whether either is
+// usable in a document, and neither advertises the feature.
+func transcribeWith(m *asr.Model, samples []float32, pnc bool) (string, error) {
+	if !pnc {
+		return m.Transcribe(context.Background(), samples)
+	}
+	res, err := m.Run(context.Background(), samples, &transcribe.RunOptions{PNC: transcribe.ModeOn})
+	if err != nil {
+		return "", err
+	}
+	return res.Text, nil
+}
+
 func main() {
 	fs := flag.NewFlagSet("transcribe", flag.ExitOnError)
 	raw := fs.Bool("raw", false, "skip normalization")
+	pnc := fs.Bool("pnc", false, "ask for punctuation and casing rather than taking the family default")
 	limitFlag := fs.Duration("limit", 0, "cut audio at this length instead of what the model can take")
 	name := fs.String("model", models.Default, "model to transcribe with")
 	fs.Parse(os.Args[1:])
@@ -81,7 +101,7 @@ func main() {
 		var parts []string
 		fail := false
 		for _, chunk := range audio.Chunk(stored, int(limit.Seconds())*audio.SampleRate) {
-			part, err := model.Transcribe(context.Background(), audio.Pad(audio.Floats(chunk, gain)))
+			part, err := transcribeWith(model, audio.Pad(audio.Floats(chunk, gain)), *pnc)
 			if err != nil {
 				log.Printf("%s: transcribe: %v", path, err)
 				fail = true

@@ -201,7 +201,22 @@ func Dir() string {
 
 // File is the GGUF's name, which carries the quantization so two quants of
 // one model can sit side by side in the cache.
-func (s Spec) File() string { return fmt.Sprintf("%s-%s.gguf", s.Name, s.quant) }
+func (s Spec) File() string {
+	if e, ok := elsewhere[s.Name]; ok {
+		return e.file
+	}
+	return fmt.Sprintf("%s-%s.gguf", s.Name, s.quant)
+}
+
+// elsewhere names the models whose GGUF is published outside the
+// handy-computer org, which is one repo per model named after it. These two
+// were converted and published by other people before this menu wanted them,
+// and fetching what exists beats asking anybody to publish a second copy of
+// the same weights. The library reads both spellings of them.
+var elsewhere = map[string]struct{ repo, file string }{
+	"fsmn-vad":      {"FunAudioLLM/fsmn-vad-GGUF", "fsmn-vad.gguf"},
+	"titanet-large": {"cstr/titanet-large-GGUF", "titanet-large.gguf"},
+}
 
 // Size is the download, for the menu and for the prompt before fetching one.
 func (s Spec) Size() string { return human.Bytes(uint64(s.MiB) << 20) }

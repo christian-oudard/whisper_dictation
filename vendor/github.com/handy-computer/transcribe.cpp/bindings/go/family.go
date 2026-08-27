@@ -12,7 +12,10 @@ package transcribe
 */
 import "C"
 
-import "unsafe"
+import (
+	"time"
+	"unsafe"
+)
 
 // Opt wraps a value for the optional fields below, where a nil pointer means
 // the family's own default and a set one overrides it:
@@ -42,6 +45,7 @@ const (
 	KindWhisperRun             ExtKind = C.TRANSCRIBE_EXT_KIND_WHISPER_RUN
 	KindVoxtralRun             ExtKind = C.TRANSCRIBE_EXT_KIND_VOXTRAL_RUN
 	KindSortformerStream       ExtKind = C.TRANSCRIBE_EXT_KIND_SORTFORMER_STREAM
+	KindTitanetDiarize         ExtKind = C.TRANSCRIBE_EXT_KIND_TITANET_DIARIZE
 	KindParakeetStream         ExtKind = C.TRANSCRIBE_EXT_KIND_PARAKEET_STREAM
 	KindParakeetBufferedStream ExtKind = C.TRANSCRIBE_EXT_KIND_PARAKEET_BUFFERED_STREAM
 	KindMoonshineStreaming     ExtKind = C.TRANSCRIBE_EXT_KIND_MOONSHINE_STREAMING_STREAM
@@ -257,6 +261,77 @@ func (o *SortformerStreamOptions) runExt() (*C.struct_transcribe_ext, func()) {
 		e.preset = C.transcribe_sortformer_preset(*o.Preset)
 	}
 	return (*C.struct_transcribe_ext)(mem), free
+}
+
+// TitanetDiarizeOptions says how many speakers a recording has.
+//
+// TitaNet diarizes by clustering, so unlike every fixed-cap diarizer here the
+// number of speakers is an input rather than an architectural constant. Left
+// unset it is estimated from the audio, which is a real estimate and not a
+// guarantee: the eigengap it comes from cannot tell one person recorded two
+// ways from two people. A caller who knows the count should give it.
+type TitanetDiarizeOptions struct {
+	// Speakers is the exact number, when it is known.
+	Speakers *int
+	// Threshold is the cosine distance at which two windows stop being the
+	// same person, used only when Speakers is unset and the estimate is
+	// switched off by giving one. Roughly 0.5 splits a speaker into several
+	// and 0.9 merges several into one.
+	Threshold *float32
+
+	// Speech is where the speech is. Given it, the model embeds only windows
+	// that fall inside these stretches instead of deciding by loudness.
+	//
+	// Worth supplying whenever the caller knows. Loudness cannot tell a voice
+	// from a chair or a keyboard, and audible non-speech clusters into an
+	// extra speaker: measured on two AMI meetings, 97 and 172 seconds of it.
+	// Anything that decides on more than energy can fill this -- a voice
+	// activity detector, a segmenter, or the word timings of a transcriber
+	// that has already run over the same audio.
+	Speech []Span
+}
+
+// Span is a stretch of audio, used for the speech regions above. Times are
+// from the start of what was passed to the run.
+type Span struct {
+	Start, End time.Duration
+}
+
+func (o *TitanetDiarizeOptions) Kind() ExtKind { return KindTitanetDiarize }
+
+// flatten turns spans into the pairs of milliseconds the C side takes: one
+// flat array rather than a struct, so no layout has to be agreed between the
+// two languages. Separate from the allocation because cgo cannot be used from
+// a test, and this is the part worth testing.
+func flatten(spans []Span) []int64 {
+	out := make([]int64, 0, 2*len(spans))
+	for _, span := range spans {
+		out = append(out, span.Start.Milliseconds(), span.End.Milliseconds())
+	}
+	return out
+}
+
+func (o *TitanetDiarizeOptions) runExt() (*C.struct_transcribe_ext, func()) {
+	mem, free := alloc(unsafe.Sizeof(C.struct_transcribe_titanet_diarize_ext{}))
+	e := (*C.struct_transcribe_titanet_diarize_ext)(mem)
+	C.transcribe_titanet_diarize_ext_init(e)
+	if o.Speakers != nil {
+		e.num_speakers = C.int32_t(*o.Speakers)
+	}
+	if o.Threshold != nil {
+		e.threshold = C.float(*o.Threshold)
+	}
+	if len(o.Speech) == 0 {
+		return (*C.struct_transcribe_ext)(mem), free
+	}
+	pairs, freePairs := alloc(uintptr(2*len(o.Speech)) * unsafe.Sizeof(C.int64_t(0)))
+	copy(unsafe.Slice((*int64)(pairs), 2*len(o.Speech)), flatten(o.Speech))
+	e.speech_ms = (*C.int64_t)(pairs)
+	e.n_speech = C.int32_t(len(o.Speech))
+	return (*C.struct_transcribe_ext)(mem), func() {
+		freePairs()
+		free()
+	}
 }
 
 // ParakeetStreamOptions are the cache-aware parakeet streaming knobs.

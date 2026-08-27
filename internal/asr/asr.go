@@ -379,6 +379,31 @@ func (m *Model) Languages() ([]string, error) {
 	return c.Languages, nil
 }
 
+// MaxTimestamps is the finest alignment the model can produce. It decides
+// whether a transcript can carry speaker labels: attribution is a join between
+// words and speaker rows, so a model that stamps only whole segments cannot be
+// joined to a diarizer however good its transcripts are.
+func (m *Model) MaxTimestamps() transcribe.Timestamps {
+	c, err := m.s.Model().Capabilities()
+	if err != nil {
+		return transcribe.StampsAuto
+	}
+	return c.MaxTimestamps
+}
+
+// Supports probes a behavioural toggle, such as whether the model attributes
+// speech to speakers at all. Setting a run option the model does not implement
+// is usually a warning rather than an error, so anything that depends on the
+// difference asks first.
+func (m *Model) Supports(f transcribe.Feature) bool { return m.s.Model().Supports(f) }
+
+// AcceptsExtension probes for a family knob. Acceptance is per variant rather
+// than per family, and passing one a model does not take fails the run, so a
+// tool that sets one on a model it did not choose asks first.
+func (m *Model) AcceptsExtension(slot transcribe.ExtSlot, kind transcribe.ExtKind) bool {
+	return m.s.Model().AcceptsExtension(slot, kind)
+}
+
 // deviceIndex is which registered device a load with these options lands on.
 // Zero means the first, which is what the library picks unaided.
 func deviceIndex(opts *transcribe.LoadOptions) int {
@@ -563,6 +588,19 @@ func (m *Model) Transcribe(ctx context.Context, audio []float32) (string, error)
 	if len(audio) == 0 {
 		return "", nil
 	}
+	res, err := m.Run(ctx, audio, nil)
+	if err != nil {
+		return "", err
+	}
+	return dropAnnotations(res.Text), nil
+}
+
+// Run is the whole of what the library reported: segments, words, speaker
+// rows, and the timings. Dictation wants one string and gets it from
+// Transcribe; a diarized transcript needs who spoke when, which is only here.
+//
+// opts nil is the library's defaults, which is what dictation runs.
+func (m *Model) Run(ctx context.Context, audio []float32, opts *transcribe.RunOptions) (transcribe.Result, error) {
 	// Only a clip longer than any before it allocates, because the compute
 	// buffers are kept at the high-water mark and reused for anything shorter.
 	// So that is the only run worth reading the device across, and what it
@@ -577,7 +615,7 @@ func (m *Model) Transcribe(ctx context.Context, audio []float32) (string, error)
 		before = m.free()
 	}
 	t0 := time.Now()
-	res, err := m.s.Run(ctx, audio, nil)
+	res, err := m.s.Run(ctx, audio, opts)
 	if grow {
 		// Counted even when the run was aborted, because ggml allocates the
 		// graph before it runs it, so the memory went whether or not a
@@ -596,14 +634,14 @@ func (m *Model) Transcribe(ctx context.Context, audio []float32) (string, error)
 		m.mu.Unlock()
 	}
 	if err != nil {
-		return "", err
+		return transcribe.Result{}, err
 	}
 	t := Timings{Mel: res.Timings.Mel, Encode: res.Timings.Encode, Decode: res.Timings.Decode}
 	t.Other = time.Since(t0) - t.Mel - t.Encode - t.Decode
 	m.mu.Lock()
 	m.timings = t
 	m.mu.Unlock()
-	return dropAnnotations(res.Text), nil
+	return res, nil
 }
 
 // dropAnnotations removes non-speech markers. Whisper emits things like

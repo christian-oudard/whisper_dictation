@@ -88,6 +88,7 @@ _diktat() {
             _arguments \
                 '-o[write the transcript here]:path:_files' \
                 '-timestamps[put the time of each turn in the document]' \
+                '(-s -speakers)'{-s,-speakers}'[how many people are in the recording]:count:' \
                 '-model[pipeline to transcribe with]:pipeline:_diktat_tx_models' \
                 '-diarizer[attribute speakers with this GGUF]:gguf:_files -g "*.gguf"' \
                 '-lang[language of the recording, or "list"]:language:' \

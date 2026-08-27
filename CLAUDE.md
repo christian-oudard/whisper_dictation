@@ -292,6 +292,81 @@ property, which reads `off` on a healthy link and a dead one; and the kernel's
 `SCO packet for unknown connection handle` line, which ordinary teardown emits
 too, `Rebuild` included.
 
+## Speaker labels
+
+Dictation never asks who is speaking: one person holds the microphone. A
+recording of a talk or an interview is the other shape, so `diktat tx-model`
+is a second menu over `internal/models.Diarizers`, `diktat transcribe` runs an
+entry over a file, and `cmd/diarize` runs a diarizer alone. Input is whatever
+the recorder wrote: anything that is not already a 16 kHz WAV goes through
+ffmpeg. The document is what was said and nothing else, with the run's own
+figures logged rather than printed into it; `-timestamps` adds the time of each
+turn, for a transcript that is an index into the audio. Paragraphs are not
+invented: a break is a two second pause after a finished sentence, which the
+speaker put there and the word stamps report. `-lang list` names the codes each
+entry takes, since the menu column names the reach of a set of 25 and the
+setting is given a member of it.
+
+It shares no entries with the first menu, on a capability rather than a
+preference. Attributing text to a speaker is a join between words and speaker
+rows, so a model that cannot stamp below a whole segment cannot carry a label
+at all. `cmd/caps` reads that out of a GGUF: of the dictation menu only the
+parakeets stamp per token, whisper stops at segments, and the rest produce no
+timestamps.
+
+The clustering entry is the one that counts rather than assuming, so it is the
+only one that can answer a room of more than four. It runs a voice activity
+detector first, because loudness cannot tell a voice from a chair and a chair
+clusters as a thing that is none of the voices; regions shorter than half a
+second are dropped, since nobody says a word in under that and what does fire
+there is a cough or a door. `-s` gives the count when somebody knows it, which
+is worth doing: the estimate cannot tell one person recorded two ways from two
+people, and on three voices it has split one of them in two.
+
+A menu entry is a whole pipeline rather than a model, because the composition
+is not a choice worth offering: sortformer produces no text and must be
+paired, and the models that transcribe and attribute in one pass cannot be
+paired with anything. Three architectures: a diarizer paired with a model that
+supplies the words, `multitalker-parakeet` whose `bundle/` GGUF has sortformer
+embedded, and MOSS, an audio-LLM emitting `[Sxx]` tags for the runtime to
+parse.
+
+Where the identity comes from is the whole difference between the pairs and
+the rest, and it is why only a pair may be cut. A model that attributes its own
+speakers numbers them from one in every piece and remembers nothing of the
+piece before, so a numbering cannot cross a cut: two pieces both open on
+speaker 1 and nothing in the text says whether that is one person or two. That
+was reconciled by repeating thirty seconds and matching the numbering over what
+both pieces heard, which works only for people who spoke on both sides of the
+cut and gave 71 speakers for 12 people. The matcher is gone; such an entry now
+refuses a recording it cannot hold in one pass and names one that can.
+
+A diarizer takes the whole recording in one pass and numbers it once, so only
+the words are cut and the pair joins the two in `transcript.Attribute`: each
+word to the speaker whose rows cover most of it. Per word rather than per segment because a segment ends where the
+transcriber drew a sentence and a row ends where somebody stopped talking, so a
+sentence across an interruption belongs to two people. A change of speaker
+shorter than a second, bracketed by one person, is the two views disagreeing at
+an edge rather than an interjection, and is dropped.
+
+Punctuation is asked for rather than assumed: it is off by the multitalker's
+family default, so the first full run came back as 109 minutes of unbroken
+lowercase. Word timestamps are asked for only where `MaxTimestamps` says the
+model has them, since asking a model that has not got them fails the run rather
+than being ignored, and a diarizer is asked for nothing finer than Auto.
+
+The speaker cap is the column that decides most choices. Everything descended
+from sortformer stops at four, and the only entry with no declared cap is the
+audio-LLM, whose working set grows with the recording. Nothing declared is not
+the same as unlimited, hence "unstated".
+
+Memory inverts what the dictation menu learned. Sortformer streams with a
+speaker cache, so it took a 1h49m recording in one pass at 248 MiB, where
+parakeet-tdt-0.6b-v2, which declares no length limit, is measured good for
+3m56s on an 8 GB card. Quantization inverts too: nothing here shares a card
+with a desktop, so these take near-reference tiers, and sortformer has no
+choice, since k-quant error can permute its speaker labels mid-stream.
+
 ## One model resident
 
 The model in use is the only one held, and the one it replaces is closed as

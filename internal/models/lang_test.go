@@ -14,6 +14,10 @@ func TestLanguagesRendering(t *testing.T) {
 		{nil, "Worldwide"},
 		{[]string{}, "Worldwide"},
 		{[]string{"en"}, "English"},
+		// Two is short enough to name outright, which says more than the
+		// reach of the set does at that size.
+		{[]string{"en", "zh"}, "English, Chinese"},
+		{[]string{"en", "de"}, "English, de"},
 		{[]string{"en", "de", "es", "fr"}, "European (4)"},
 		{[]string{"en", "de", "es", "fr", "pt"}, "European (5)"},
 		// One language from outside Europe is enough: the point of the label
