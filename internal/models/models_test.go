@@ -1,6 +1,8 @@
 package models
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 )
@@ -49,6 +51,34 @@ func TestNoNumericModelNames(t *testing.T) {
 	for _, s := range Catalog {
 		if _, err := strconv.Atoi(s.Name); err == nil {
 			t.Errorf("%q is a number, which collides with menu-number selection", s.Name)
+		}
+	}
+}
+
+// The menu says a model is downloaded and the loader then refuses it: that is
+// what a file with the right name and the wrong contents produces, and the
+// library's own message for it is four words with no path in them.
+func TestCheckReadsTheMagic(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.gguf")
+	if err := os.WriteFile(good, append([]byte("GGUF"), 0, 0, 0, 0), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Check(good); err != nil {
+		t.Errorf("Check rejected a GGUF: %v", err)
+	}
+
+	for name, body := range map[string][]byte{
+		"empty.gguf": {},
+		"wrong.gguf": []byte("RIFF....WAVE"),
+		"short.gguf": []byte("GG"),
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := Check(path); err == nil {
+			t.Errorf("Check accepted %s", name)
 		}
 	}
 }

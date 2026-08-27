@@ -24,12 +24,30 @@ func Download(name string, progress io.Writer) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown model %q", name)
 	}
+	return download(spec, progress)
+}
+
+// download is the same for a model reached through either menu.
+func download(spec Spec, progress io.Writer) (string, error) {
 	if err := os.MkdirAll(Dir(), 0755); err != nil {
 		return "", err
 	}
 	dest := spec.Path()
-	url := fmt.Sprintf("%s/%s-gguf/resolve/main/%s", hfOrg, spec.Name, spec.File())
+	url := fmt.Sprintf("%s/%s-gguf/resolve/main/%s%s", hfOrg, spec.Name, dir(spec), spec.File())
 	return dest, get(url, dest, progress)
+}
+
+// dir is the directory the GGUF sits in within its repo. Almost always the
+// root, and for the multitalker parakeet a choice: upstream publishes the same
+// file twice, plain and under bundle/ with the sortformer diarizer embedded in
+// it. Only the bundle is in a menu here, since embedded speaker attribution is
+// the whole reason to reach for that model, so nothing has to name the
+// difference and the cached file keeps the upstream name.
+func dir(spec Spec) string {
+	if spec.Name == "multitalker-parakeet-streaming-0.6b-v1" {
+		return "bundle/"
+	}
+	return ""
 }
 
 func get(url, dest string, progress io.Writer) error {
@@ -38,7 +56,7 @@ func get(url, dest string, progress io.Writer) error {
 		return nil
 	}
 
-	resp, err := http.Get(url)
+	resp, err := fetch(url, patience)
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,19 @@ import (
 	"path/filepath"
 )
 
+// ConfigDir is where the hand-authored config lives: $XDG_CONFIG_HOME/diktat,
+// or ~/.config/diktat. The spec says to honour the variable, and a person who
+// has set it has said where their configuration goes; reading somewhere else
+// means their file is ignored with no message, since a missing config is not
+// an error.
+func ConfigDir() string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "diktat")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "diktat")
+}
+
 // StateDir is where what diktat decided lives, and it outlives the session:
 // $XDG_STATE_HOME/diktat, or ~/.local/state/diktat. Deleting it costs nothing
 // that cannot be decided again.

@@ -208,7 +208,7 @@ func switchModel(nameOrNumber string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := os.WriteFile(modelPath, []byte(path), 0644); err != nil {
+	if err := ipc.Write(modelPath, []byte(path), 0644); err != nil {
 		log.Fatalf("write model file: %v", err)
 	}
 	if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {

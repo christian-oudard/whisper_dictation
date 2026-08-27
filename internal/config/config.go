@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
@@ -60,10 +59,10 @@ func (h *HistoryFile) UnmarshalTOML(v any) error {
 	return fmt.Errorf("history_file must be a path, true or false, not %T", v)
 }
 
-// DefaultPath returns the standard config location.
+// DefaultPath returns the standard config location, honouring
+// XDG_CONFIG_HOME the way the state directory honours XDG_STATE_HOME.
 func DefaultPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "diktat", "config.toml")
+	return filepath.Join(xdg.ConfigDir(), "config.toml")
 }
 
 // Load parses the config file at path. A missing file returns a zero Config

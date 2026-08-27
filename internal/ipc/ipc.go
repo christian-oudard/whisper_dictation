@@ -106,6 +106,25 @@ func readPID(path string) int {
 	if syscall.Kill(pid, 0) != nil {
 		return 0
 	}
+	// Live is not enough: PIDs are recycled, and a daemon that died without
+	// removing this file leaves a number some unrelated process may now be
+	// using. `toggle` sends SIGUSR1 to whatever this returns, and the default
+	// action for SIGUSR1 is to terminate -- so a stale file plus a recycled
+	// PID means dictation kills a stranger's process.
+	//
+	// Two things count as diktat: the same binary, which is the ordinary case
+	// and covers the tests, or another build of it, which is what an upgrade
+	// leaves running until the daemon is restarted.
+	exe := ExePath(pid)
+	if exe == "" {
+		return 0
+	}
+	if self, err := os.Executable(); err == nil && exe == self {
+		return pid
+	}
+	if filepath.Base(exe) != "diktat" {
+		return 0
+	}
 	return pid
 }
 
@@ -117,4 +136,40 @@ func ExePath(pid int) string {
 		return ""
 	}
 	return path
+}
+
+// Write replaces a file's contents in one step, so that anything reading it
+// sees either what was there before or what is there now, and never half of
+// each.
+//
+// Every file this package names is read by another process while the daemon
+// writes it: a bar polls the status several times a second, `diktat model`
+// reads the model and activity files, and `diktat repeat` reads the last
+// transcription. os.WriteFile truncates and then writes, which leaves a window
+// -- short, but the same length for every reader -- in which the file is empty
+// or half a sentence. Repeat typing half a sentence is the version of this
+// that somebody notices.
+//
+// The temporary file is created in the same directory, because rename is
+// atomic only within a filesystem.
+func Write(path string, data []byte, perm os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp) // No-op once the rename below has succeeded.
+
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

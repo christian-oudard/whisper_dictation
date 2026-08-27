@@ -2,6 +2,7 @@ package sco
 
 import (
 	"encoding/binary"
+	"errors"
 	"os"
 	"testing"
 )
@@ -55,4 +56,30 @@ func TestLinks(t *testing.T) {
 		t.Errorf("Links() = %d", n)
 	}
 	t.Logf("synchronous links now: %d", n)
+}
+
+// A dongle pulled between listing the adapters and asking one of them is
+// ordinary, and the caller stops watching for good on an error: failing the
+// whole call would retire the watch on exactly the machines that have a
+// headset to lose.
+func TestOneAdapterMayFail(t *testing.T) {
+	total, err := totalLinks([]int{0, 1}, func(id int) (int, error) {
+		if id == 1 {
+			return 0, errors.New("no such device")
+		}
+		return 2, nil
+	})
+	if err != nil || total != 2 {
+		t.Errorf("totalLinks = %d, %v; want the working adapter's 2 and no error", total, err)
+	}
+}
+
+// Every adapter failing is not one dongle, it is no permission or no stack,
+// and the caller has to hear about it rather than be told there are no links.
+func TestEveryAdapterFailing(t *testing.T) {
+	if _, err := totalLinks([]int{0, 1}, func(int) (int, error) {
+		return 0, errors.New("operation not permitted")
+	}); err == nil {
+		t.Error("totalLinks reported no links when nothing could be read")
+	}
 }

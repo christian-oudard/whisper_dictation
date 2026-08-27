@@ -68,13 +68,38 @@ func Links() (int, error) {
 	}
 	defer syscall.Close(fd)
 
-	total := 0
+	return totalLinks(ids, func(id int) (int, error) { return adapterLinks(fd, id) })
+}
+
+// totalLinks adds up what every adapter reports, tolerating an adapter that
+// does not answer as long as another one does.
+//
+// One adapter failing is ordinary: a USB dongle can be pulled between listing
+// the adapters and asking this one, and its ioctl then fails with the rest of
+// the machine's bluetooth working. The caller stops watching for good on an
+// error, so failing the whole call for that would silently retire the watch
+// on exactly the machines that have a headset to lose.
+//
+// Every adapter failing is different. That is no permission, or no bluetooth
+// stack, and the caller should hear about it once rather than be told there
+// are no links -- which is what would make it rebuild the audio device for
+// nothing.
+func totalLinks(ids []int, count func(int) (int, error)) (int, error) {
+	total, answered := 0, 0
+	var first error
 	for _, id := range ids {
-		n, err := adapterLinks(fd, id)
+		n, err := count(id)
 		if err != nil {
-			return 0, err
+			if first == nil {
+				first = err
+			}
+			continue
 		}
+		answered++
 		total += n
+	}
+	if answered == 0 && first != nil {
+		return 0, first
 	}
 	return total, nil
 }

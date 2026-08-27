@@ -1,0 +1,162 @@
+.TH DIKTAT 1 "2026-08-23" "diktat 1.0.0" "User Commands"
+.SH NAME
+diktat \- voice dictation that types where you are looking
+.SH SYNOPSIS
+.B diktat
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+.B diktat
+transcribes speech locally and types it into whatever window has focus. A
+daemon holds one speech model for the whole session, so a dictation costs the
+time it takes to say it rather than the time it takes to load a model. No audio
+leaves the machine, and nothing needs a network once a model has been fetched.
+.PP
+It also transcribes recordings into documents that say who spoke.
+.SH COMMANDS
+.TP
+.B daemon
+Run for the session: hold the model, record while toggled on, transcribe, and
+type. Started by the systemd user service; it never records by itself and never
+exits by itself. With no model downloaded it waits, and loads the first one
+.B diktat model
+names.
+.TP
+.B toggle
+Start or stop recording. Bind this to a key.
+.TP
+.B repeat
+Type the last transcription again.
+.TP
+.BR model " [" \fImodel\fR ]
+List the speech models, or switch to one, downloading it first if the cache
+lacks it. A model may be named or given by its number in the listing.
+.TP
+.BR transcribe " [" \fIoptions\fR "] " \fIrecording\fR
+Transcribe a recording into a markdown document with speaker labels. Any format
+.BR ffmpeg (1)
+reads is accepted. Given a
+.I .json
+turns file from an earlier run, the document is rendered again without
+transcribing anything.
+.TP
+.BR tx\-model " [" \fIpipeline\fR ]
+List the pipelines that produce speaker-labelled transcripts, or choose one.
+The column to read is Speakers: everything descended from one diarizer stops at
+four.
+.TP
+.B version
+Report the release, the source it was built from where that is not the release
+itself, and whether the running daemon is the same build.
+.SH TRANSCRIBE OPTIONS
+.TP
+.BI \-o " path"
+Write the transcript here. The default is beside the audio.
+.TP
+.B \-timestamps
+Put the time of each turn in the document. Off by default: a timestamp is worth
+having when the document is an index into the audio and in the way when it is
+something to read.
+.TP
+.BI \-model " pipeline"
+Use this pipeline instead of the one
+.B tx\-model
+chose.
+.TP
+.BI \-diarizer " gguf"
+Attribute speakers with this model instead of the pipeline's. For a diarizer
+that is not in the menu yet.
+.TP
+.BI \-lang " language"
+The language of the recording.
+.B \-lang list
+prints what each pipeline takes.
+.TP
+.BI \-chunk " duration"
+The longest piece to transcribe at once. The default is what the pipeline can
+hold.
+.SH FILES
+.TP
+.I ~/.config/diktat/config.toml
+Optional. Sets the model to start on, per-application paste methods, and
+whether to keep a history file. An unknown key is an error rather than being
+ignored.
+.TP
+.I ~/.local/state/diktat/
+The remembered model choice, and
+.IR status ,
+which is Pango markup for a status bar: REC while recording, TX while
+transcribing, LOAD while a model is being read, and ERR when the last press
+put no words on screen \(em no model, a microphone that delivered nothing, or
+text that could not be typed, which
+.B diktat repeat
+still has. The journal says which.
+.TP
+.I $XDG_RUNTIME_DIR/diktat/
+The session's files: the daemon's PID, the model in use, the last
+transcription, and what the daemon is doing. Emptied at logout.
+.TP
+.I ~/.cache/diktat/models/
+Downloaded models. Nothing is bundled and nothing is fetched at install time.
+.SH ENVIRONMENT
+.TP
+.B DIKTAT_GPU
+.B 0
+forces the CPU;
+.B 1
+takes whatever GPU the library picks. Unset, a discrete GPU is used when there
+is one and the CPU otherwise, because an integrated GPU shares memory bandwidth
+with the CPU it would be replacing.
+.TP
+.B DIKTAT_DEBUG
+Log how things happened as well as what happened: audio levels, per-stage
+timings, and where a model load's time went.
+.SH TYPING
+Typing has no portable tool. On wlroots compositors \(em sway, Hyprland, river,
+wayfire, labwc, niri \(em
+.BR wtype (1)
+works. GNOME and KDE do not implement the protocol it needs, so install
+.BR ydotool (1)
+and run
+.BR ydotoold (8)
+there. On X11, install
+.BR xdotool (1).
+diktat tries them in order and names the ones that are missing when it cannot
+type.
+.PP
+The paste methods borrow the clipboard, which follows the session in the same
+way:
+.BR wl\-copy (1)
+and
+.BR wl\-paste (1)
+on Wayland,
+.BR xclip (1)
+or
+.BR xsel (1)
+on X11.
+.SH SESSIONS
+The daemon is a user service and inherits nothing of the graphical session, so
+it finds one when it has something to type: the compositor's own process
+carries
+.B WAYLAND_DISPLAY
+or
+.BR DISPLAY ,
+and on X11 the
+.B XAUTHORITY
+that goes with it. Wayland is looked for first, because a Wayland session runs
+Xwayland and so holds both.
+.PP
+Two live sessions is an error rather than a choice: either is a plausible
+target and the wrong one puts the dictation on the other screen.
+.SH SEE ALSO
+.BR ffmpeg (1),
+.BR wtype (1),
+.BR ydotool (1),
+.BR xdotool (1),
+.BR xclip (1),
+.BR systemctl (1)
+.PP
+The project documentation covers the model menu, the speaker-labelling
+pipeline and what it is measured at:
+.PP
+https://github.com/christian\-oudard/diktat

@@ -32,6 +32,12 @@ const (
 	statusLoad = `<span color="#fabd2f">● LOAD</span>`
 	statusRec  = `<span color="#fb4934">● REC</span>`
 	statusTx   = `<span color="#458588">● TX</span>`
+	// A press of the dictation key that did not put words on screen: no model
+	// to transcribe with, or text that could not be typed. It is on the bar
+	// because the alternative is a key that appears to do nothing, when in
+	// fact there is a line in the journal saying exactly what to do about it.
+	// It stays until the next press, since it describes the last one.
+	statusErr = `<span color="#fe8019">● ERR</span>`
 )
 
 // exitConfig is EX_CONFIG from sysexits.h, for a config only a person can
@@ -65,14 +71,6 @@ func runDaemon(args []string) {
 		// in a real config looking like it worked.
 		log.Printf("config: ignoring unknown key %q", key)
 	}
-	// Nothing is bundled, and nothing is downloaded implicitly: say what to
-	// type instead.
-	name := config.StartModel()
-	modelDir := models.Resolve(name)
-	if err := models.Check(modelDir); err != nil {
-		log.Fatalf("%s is not downloaded. Get it with:\n  diktat model %s", name, name)
-	}
-
 	// Logging is stderr and nothing else: under systemd that is the journal,
 	// which timestamps every line itself, keeps them across restarts and can
 	// be followed while the daemon is running. A file of our own was one more
@@ -101,7 +99,7 @@ func runDaemon(args []string) {
 		log.Fatal(err)
 	}
 
-	if err := os.WriteFile(pidPath, []byte(fmt.Sprint(os.Getpid())), 0644); err != nil {
+	if err := ipc.Write(pidPath, []byte(fmt.Sprint(os.Getpid())), 0644); err != nil {
 		log.Fatalf("write pid: %v", err)
 	}
 	defer os.Remove(pidPath)
@@ -111,13 +109,28 @@ func runDaemon(args []string) {
 	// What to start on comes from config.StartModel, never from the model file
 	// above: that file says what a daemon has loaded, and a daemon starting
 	// has loaded nothing.
-	model, err := asr.Load(modelDir)
-	if err != nil {
-		// The remembered choice is not undone by a load that fails, so this
-		// is a daemon that will fail the same way at every start until
-		// someone changes it or replaces the file. Say how to do both.
-		log.Fatalf("load model: %v\nPick another with `diktat model`, or refetch this one:\n  rm %s && diktat model %s",
+	//
+	// Neither a model that is not there nor one that will not load stops the
+	// daemon. Nothing is bundled and nothing is downloaded implicitly, so a
+	// fresh install has no model at all, and exiting meant the unit restarted
+	// every two seconds until the start limit gave up on it -- after which
+	// downloading a model changed nothing, because the daemon that would have
+	// loaded it was dead. Waiting costs a process that cannot dictate yet and
+	// says so; `diktat model` is heard either way, and loads what it names.
+	name := config.StartModel()
+	modelDir := models.Resolve(name)
+	var model *asr.Model
+	if err := models.Check(modelDir); err != nil {
+		log.Printf("%s is not downloaded, so there is nothing to dictate with yet. Get it with:\n  diktat model %s",
+			name, name)
+	} else if loaded, err := asr.Load(modelDir); err != nil {
+		// The remembered choice is not undone by a load that fails, so every
+		// start will fail the same way until someone changes it or replaces
+		// the file. Say how to do both.
+		log.Printf("load model: %v\nPick another with `diktat model`, or refetch this one:\n  rm -r %s && diktat model %s",
 			err, modelDir, name)
+	} else {
+		model = loaded
 	}
 	defer os.Remove(modelPath)
 
@@ -134,15 +147,23 @@ func runDaemon(args []string) {
 		rehearsed: make(chan bucketResult, 1),
 		asleep:    suspend.Total(),
 		linkWatch: true,
+		// A daemon with no model cannot dictate, and a bar showing nothing
+		// says the opposite. The journal above says which of the two reasons
+		// it is.
+		failed: model == nil,
 	}
 	defer d.closeModel()
 	defer os.Remove(activityPath)
-	// Ready here, not after the rehearsal: the model can transcribe as soon as
-	// it is loaded, and warming it is worth several seconds on a large one.
-	// Those seconds are spent between dictations from now on.
-	log.Printf("Model loaded: %s", model.Arch())
-	debugf("Load: %s", model.LoadTimings())
-	d.install(modelDir, model)
+	if model == nil {
+		d.restoreStatus()
+	} else {
+		// Ready here, not after the rehearsal: the model can transcribe as soon
+		// as it is loaded, and warming it is worth several seconds on a large
+		// one. Those seconds are spent between dictations from now on.
+		log.Printf("Model loaded: %s", model.Arch())
+		debugf("Load: %s", model.LoadTimings())
+		d.install(modelDir, model)
+	}
 
 	// The look for a suspend. Two seconds so the reload is under way before
 	// anyone is back at the keyboard; the tick itself is two clock reads.
@@ -182,13 +203,25 @@ func runDaemon(args []string) {
 	}
 }
 
+// recorder is what the daemon needs from the microphone, which is less than
+// the microphone does. Named as an interface so that the dictation path --
+// press, speak, press, type -- can be tested without a sound card: it is the
+// most used code in the program and had no test at all, because the capture
+// buffer cannot be filled from outside internal/audio.
+type recorder interface {
+	Start()
+	Stop() []int16
+	Rebuild() error
+	Close()
+}
+
 type daemon struct {
 	// The one model resident, and where it was loaded from. One, because a
 	// model this size is most of a laptop card: they were kept so switching
 	// back was instant, and holding 3.4 GiB of a shared 8 for a model nobody
 	// is using costs more than a reload does.
 	model     *asr.Model
-	recorder  *audio.Recorder
+	recorder  recorder
 	cfg       *config.Config
 	startedAt time.Time
 	modelDir  string
@@ -227,6 +260,12 @@ type daemon struct {
 	probing  bool
 	probe    string
 	answered bool
+
+	// failed says a press of the dictation key did not put words on screen:
+	// no model to transcribe with, or text that could not be typed. It is
+	// what the bar shows when nothing else is happening. Written and read on
+	// the main loop, like everything else in this struct.
+	failed bool
 
 	// asleep is the machine's suspend total as of the last look, and suspends
 	// counts the sleeps noticed. A load carries the count it started under, so
@@ -297,7 +336,7 @@ type loadResult struct {
 }
 
 func (d *daemon) publishModel() {
-	if err := os.WriteFile(modelPath, []byte(d.modelDir), 0644); err != nil {
+	if err := ipc.Write(modelPath, []byte(d.modelDir), 0644); err != nil {
 		log.Printf("model publish: %v", err)
 	}
 }
@@ -611,6 +650,13 @@ func (d *daemon) install(dir string, model *asr.Model) {
 	if d.model != nil {
 		d.model.Close()
 	}
+	// A daemon that had nothing to transcribe with has something now, so the
+	// bar stops saying the last press failed. Only from nothing: a switch does
+	// not undo a dictation that could not be typed, and the tool that could
+	// not type it is still missing.
+	if d.model == nil {
+		d.failed = false
+	}
 	d.model, d.modelDir = model, dir
 	// What the model it replaces had words for says nothing about this one.
 	d.answered = false
@@ -742,6 +788,8 @@ func (d *daemon) restoreStatus() {
 		setStatus(statusRec)
 	case d.loading != "":
 		setStatus(statusLoad)
+	case d.failed:
+		setStatus(statusErr)
 	default:
 		setStatus("")
 	}
@@ -767,7 +815,7 @@ func (d *daemon) publishActivity() {
 		os.Remove(activityPath)
 		return
 	}
-	if err := os.WriteFile(activityPath, []byte(line), 0644); err != nil {
+	if err := ipc.Write(activityPath, []byte(line), 0644); err != nil {
 		log.Printf("activity: %v", err)
 	}
 }
@@ -785,6 +833,9 @@ func (d *daemon) isRecording() bool {
 // not rest on that staying true.
 func (d *daemon) startRecording() {
 	setStatus(statusRec)
+	// Whatever went wrong last time, this press is about this dictation. A
+	// missing model puts it back within the second, from the press itself.
+	d.failed = false
 	d.startedAt = time.Now()
 	d.recorder.Start()
 	d.mu.Lock()
@@ -962,7 +1013,6 @@ func (d *daemon) stopRecording() {
 		log.Println("No audio.")
 		return
 	}
-
 	peak, rms := audio.Levels(samples)
 	silent := audio.IsSilent(samples)
 	// One gain for the whole capture, applied to each piece as it is
@@ -987,6 +1037,11 @@ func (d *daemon) stopRecording() {
 		if err := d.recorder.Rebuild(); err != nil {
 			log.Printf("Rebuilding the audio device failed: %v", err)
 		}
+		// The press produced nothing and the reason was not the speaker, so
+		// the bar says so. A capture that is merely silent does not: somebody
+		// pressing the key and saying nothing is an ordinary thing to do, and
+		// a light that scolds them for it is noise.
+		d.failed = true
 		return
 	}
 
@@ -994,6 +1049,23 @@ func (d *daemon) stopRecording() {
 	// transcribe silence, and the inventions cost more than the check does.
 	if silent {
 		log.Printf("Nothing to transcribe: the capture is silent.")
+		return
+	}
+
+	// No model means the load failed and there was nothing already resident to
+	// fall back to. Everything below this dereferences the model, so without
+	// this the second press of the dictation key takes the daemon down with a
+	// nil pointer -- and the unit restarts it, into the same failed load, so
+	// the crash repeats every time somebody tries to dictate.
+	//
+	// After the silence checks rather than before them: a microphone that has
+	// gone silent is worth repairing whether or not there is a model to
+	// transcribe with, since the repair is what makes the next dictation
+	// possible once there is one.
+	if d.model == nil {
+		log.Printf("No model is loaded, so there is nothing to transcribe with. "+
+			"Choose one with: diktat model %s", config.StartModel())
+		d.failed = true
 		return
 	}
 
@@ -1015,6 +1087,7 @@ func (d *daemon) stopRecording() {
 		part, err := d.model.Transcribe(context.Background(), audio.Pad(audio.Floats(chunk, gain)))
 		if err != nil {
 			log.Printf("transcribe: %v", err)
+			d.failed = true
 			return
 		}
 		if part != "" {
@@ -1050,12 +1123,17 @@ func (d *daemon) stopRecording() {
 		out := text + " "
 		if path, err := ipc.LastText(); err != nil {
 			log.Printf("last-text: %v", err)
-		} else if err := os.WriteFile(path, []byte(out), 0600); err != nil {
+		} else if err := ipc.Write(path, []byte(out), 0600); err != nil {
 			log.Printf("last-text write: %v", err)
 		}
 		d.appendHistory(text)
+		// The text is written above before this runs, so a failure here loses
+		// nothing: `diktat repeat` types it again, and saying so is the whole
+		// difference between a bad minute and a lost sentence.
 		if err := output.Type(out, d.cfg.TypingMethods); err != nil {
 			log.Printf("type: %v", err)
+			log.Println("The text is kept; `diktat repeat` types it again.")
+			d.failed = true
 		}
 	}
 }
@@ -1064,10 +1142,10 @@ func (d *daemon) appendHistory(text string) {
 	if d.cfg.HistoryFile == "" {
 		return
 	}
-	path := string(d.cfg.HistoryFile)
-	if path[0] == '~' {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, path[1:])
+	path, err := historyPath(string(d.cfg.HistoryFile))
+	if err != nil {
+		log.Printf("history path: %v", err)
+		return
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		log.Printf("history mkdir: %v", err)
@@ -1081,11 +1159,40 @@ func (d *daemon) appendHistory(text string) {
 		return
 	}
 	defer f.Close()
-	enc := json.NewEncoder(f)
-	_ = enc.Encode(map[string]string{
+	// The mode above applies only when this call creates the file. A history
+	// that already exists keeps whatever mode it had, so one created before
+	// this rule -- or by anything else -- stays readable by everyone on the
+	// machine, silently and forever.
+	if info, err := f.Stat(); err == nil && info.Mode().Perm()&0o077 != 0 {
+		if err := f.Chmod(0o600); err != nil {
+			log.Printf("history chmod: %v", err)
+		}
+	}
+	if err := json.NewEncoder(f).Encode(map[string]string{
 		"ts":   time.Now().UTC().Format(time.RFC3339Nano),
 		"text": text,
-	})
+	}); err != nil {
+		// A full disk loses the line either way; saying so is the difference
+		// between a history with a gap and a history nobody knows has one.
+		log.Printf("history write: %v", err)
+	}
+}
+
+// historyPath expands a leading ~ against the home directory, which a
+// hand-written config is likely to contain and nothing else here expands.
+//
+// Only "~" and "~/..." -- "~someone/notes" names another user's home, which
+// this cannot resolve and must not quietly turn into a directory of that name
+// under this user's.
+func historyPath(raw string) (string, error) {
+	if raw != "~" && !strings.HasPrefix(raw, "~/") {
+		return raw, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", fmt.Errorf("%s starts with ~ and there is no home directory: %w", raw, err)
+	}
+	return filepath.Join(home, strings.TrimPrefix(raw, "~")), nil
 }
 
 // debugEnabled turns on the lines that describe how the daemon did something
@@ -1126,5 +1233,5 @@ func logFlags() int {
 var statusPath, modelPath, activityPath string
 
 func setStatus(s string) {
-	_ = os.WriteFile(statusPath, []byte(s), 0644)
+	_ = ipc.Write(statusPath, []byte(s), 0644)
 }

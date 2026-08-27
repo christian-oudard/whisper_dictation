@@ -27,6 +27,9 @@ You can check which version you installed with `diktat version`.
 
 ## Download a speech model
 
+The daemon can be started before any of this; with no model it waits and says
+so, and loads the first one you name.
+
 First, download a small speech model. The best small model is currently `parakeet-tdt_ctc-110m`.
 `$ diktat model parakeet-tdt_ctc-110m`
 

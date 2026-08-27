@@ -5,6 +5,7 @@ package models
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,8 +44,15 @@ func (s Spec) Languages() string {
 		// A model that lists a hundred, which no column can hold and no
 		// caveat improves on.
 		return "Worldwide"
-	case len(s.Langs) == 1:
-		return language(s.Langs[0])
+	case len(s.Langs) <= 2:
+		// Short enough to name outright, which beats naming the reach: a
+		// model taking English and Chinese is not "Worldwide (2)" to anyone
+		// who speaks a third language.
+		names := make([]string, len(s.Langs))
+		for i, code := range s.Langs {
+			names[i] = language(code)
+		}
+		return strings.Join(names, ", ")
 	case european(s.Langs):
 		return fmt.Sprintf("European (%d)", len(s.Langs))
 	}
@@ -76,7 +84,7 @@ func european(langs []string) bool {
 // say which rather than make its code do the work. Only the codes that appear
 // alone in the menu are named; anything else falls back to the code.
 func language(code string) string {
-	if name, ok := map[string]string{"en": "English"}[code]; ok {
+	if name, ok := map[string]string{"en": "English", "zh": "Chinese"}[code]; ok {
 		return name
 	}
 	return code
@@ -90,10 +98,10 @@ func language(code string) string {
 // a GPU should move up to parakeet-tdt-0.6b-v2, which the README says.
 const Default = "parakeet-tdt_ctc-110m"
 
-// Catalog is the whole menu: one entry per niche, not everything upstream
-// publishes. WER is the Open ASR Leaderboard average over its eight
-// short-form English sets, which is a better guide for dictation than
-// LibriSpeech alone.
+// Catalog is the whole menu: as many of the models the library supports as
+// can be carried easily, since an entry costs a line and nothing is bundled.
+// WER is the Open ASR Leaderboard average over its eight short-form English
+// sets, which is a better guide for dictation than LibriSpeech alone.
 //
 //	whisper-base.en                       English, flat cost at any length
 //	parakeet-tdt_ctc-110m      6.6% WER   English, the default
@@ -144,8 +152,8 @@ const Default = "parakeet-tdt_ctc-110m"
 //
 // Two .en whispers were dropped once there was something to compare them
 // against. whisper-small.en at 184 MiB was beaten by parakeet-tdt_ctc-110m at
-// 96, and whisper-tiny.en at 42 MiB by moonshine-tiny at 33, which leaves
-// them covering a niche twice each.
+// 96, and whisper-tiny.en at 42 MiB by moonshine-tiny at 33: beaten outright
+// on size and accuracy at once, which is the bar for leaving one out.
 //
 // moonshine-tiny is the floor: worth it only where nothing else fits.
 // granite is the ceiling on accuracy, and cohere-transcribe on size; both are
@@ -259,6 +267,21 @@ func Check(path string) error {
 	}
 	if !strings.HasSuffix(path, ".gguf") {
 		return fmt.Errorf("%s: not a .gguf", path)
+	}
+	// Every GGUF starts with these four bytes. Checking them turns two
+	// confusing failures into one clear one: a download that was interrupted
+	// between the .part rename and the disk finishing with it looks like a
+	// model the menu says is present and the loader refuses, and a file that
+	// was renamed to .gguf by hand looks the same. Both come back from the
+	// library as "gguf load error", four words with no path in them.
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var magic [4]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil || string(magic[:]) != "GGUF" {
+		return fmt.Errorf("%s: not a GGUF file", path)
 	}
 	return nil
 }

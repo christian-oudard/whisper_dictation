@@ -29,7 +29,13 @@ never implicitly.
   rather than keeping a copy, since the copy drifted. The nix build stamps the
   revision and commit date in through ldflags; the date uses a `T` rather than
   a space, since ldflags are joined on spaces.
-- `cmd/diktat/daemon.go` - the whole daemon. Keeps the model loaded, rehearses
+- `cmd/diktat/daemon.go` - the whole daemon. A model that is missing or will
+  not load does not stop it: nothing is bundled and nothing is fetched
+  implicitly, so a fresh install has no model, and exiting meant the unit
+  restarted every two seconds until the start limit gave up -- after which
+  downloading one changed nothing, because what would have loaded it was dead.
+  It waits instead, says so on the bar, and loads what `diktat model` names.
+  Keeps the model loaded, rehearses
   it between dictations, toggles recording on SIGUSR1, transcribes, types via
   wtype. Runs for the session: it never starts recording by itself and never
   exits by itself. Signal handlers are installed before the model load, so a
@@ -330,13 +336,26 @@ session always sets it.
 In `$XDG_STATE_HOME/diktat/`, beside the remembered model choice, is the one
 file another program reads:
 
-- `status` - Pango markup for the bar: REC, TX, and LOAD while a model is being
-  read
+- `status` - Pango markup for the bar: REC, TX, LOAD while a model is being
+  read, and ERR when the last dictation was transcribed and could not be typed
 
 Both toggles write it before anything else the press sets off, and TX covers
 everything between the press and the text. What the daemon happens to be doing
 when the key arrives is not the light's business, and REC through any of that
 says the mic is live when it is not.
+
+ERR is the one that is about the last press rather than this one: it says the
+press put no words on screen. Three things do that -- no model to transcribe
+with, a microphone that delivered nothing, and text that could not be typed --
+and each is a line in the journal saying what to do. Without it the key looks
+like it does nothing, when in fact a desktop with no typing tool fails every
+dictation and the text is one `diktat repeat` away, since `last` is written
+before the typing is attempted. It outranks idle and nothing else, and the
+next press clears it.
+
+A capture that is merely silent is not one of the three. Pressing the key
+around silence is an ordinary thing to do and a light that scolds anybody for
+it is noise.
 
 It lives with the state rather than the runtime files because a bar's config
 has to name the path and `/run/user/<uid>` cannot be written as `~`. The cost

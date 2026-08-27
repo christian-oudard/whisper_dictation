@@ -38,3 +38,18 @@ func TestRuntimeDirUnset(t *testing.T) {
 		t.Errorf("RuntimeDir() = %q with no XDG_RUNTIME_DIR, want an error", got)
 	}
 }
+
+// The spec says to honour the variable, and somebody who has set it has said
+// where their configuration goes. Reading somewhere else means their file is
+// ignored in silence, since a missing config is not an error.
+func TestConfigDirFollowsTheVariable(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/somewhere/else")
+	if got := ConfigDir(); got != "/somewhere/else/diktat" {
+		t.Errorf("ConfigDir = %q, want /somewhere/else/diktat", got)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/home/nobody")
+	if got := ConfigDir(); got != "/home/nobody/.config/diktat" {
+		t.Errorf("ConfigDir = %q, want the ~/.config fallback", got)
+	}
+}

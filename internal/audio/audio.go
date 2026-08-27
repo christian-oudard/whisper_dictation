@@ -104,12 +104,21 @@ func (r *Recorder) capture(_, in []byte, frameCount uint32) {
 	if !r.active {
 		return
 	}
+	// Trust the frame count only as far as the buffer goes. This is a
+	// callback from C during a dictation, so reading past the end is not an
+	// error value, it is the daemon disappearing mid-sentence.
+	if n := len(in) / 2; n < int(frameCount) {
+		frameCount = uint32(n)
+	}
 	samples := make([]int16, frameCount)
-	var peak int16
+	var peak int32
 	for i := range samples {
 		s := int16(binary.LittleEndian.Uint16(in[2*i:]))
 		samples[i] = s
-		a := s
+		// In int32, because negating the most negative int16 gives itself
+		// back: a full-scale negative sample would read as quieter than
+		// silence and the meter would ignore the loudest thing in the frame.
+		a := int32(s)
 		if a < 0 {
 			a = -a
 		}
