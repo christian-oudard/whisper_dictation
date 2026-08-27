@@ -323,6 +323,21 @@ there is a cough or a door. `-s` gives the count when somebody knows it, which
 is worth doing: the estimate cannot tell one person recorded two ways from two
 people, and on three voices it has split one of them in two.
 
+Long silences are shortened before a model is paid by the second to listen to
+them: `internal/silence` cuts the middle out of any gap over `-pause`, one
+second by default, and hands back a timeline that puts every stamp into the
+recording's own time at the three seams where a model's answer enters the
+program. Nothing downstream knows it happened, which is what keeps the
+paragraph rule reading the pause somebody actually left.
+
+Two rules decide what is silence, and they are deliberately different. The
+detector gates the diarizer strictly, since a false yes there is an extra
+speaker. Deleting audio is lenient -- a cut is narrowed to what is quiet by
+loudness as well as unmarked by the detector, measured against a fortieth of a
+decibel scale taken from this recording's own speech -- since a false yes there
+is somebody's words. The strict rule alone deleted a meeting's opening
+greeting, which the detector had missed.
+
 A menu entry is a whole pipeline rather than a model, because the composition
 is not a choice worth offering: sortformer produces no text and must be
 paired, and the models that transcribe and attribute in one pass cannot be

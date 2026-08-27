@@ -17,6 +17,7 @@ import (
 	"github.com/christian-oudard/diktat/internal/config"
 	"github.com/christian-oudard/diktat/internal/human"
 	"github.com/christian-oudard/diktat/internal/models"
+	"github.com/christian-oudard/diktat/internal/silence"
 	"github.com/christian-oudard/diktat/internal/transcript"
 	"github.com/christian-oudard/diktat/internal/wav"
 )
@@ -45,6 +46,8 @@ func runTranscribe(args []string) {
 	var speakers int
 	fs.IntVar(&speakers, "speakers", 0, "how many people are in the recording, if you know")
 	fs.IntVar(&speakers, "s", 0, "shorthand for -speakers")
+	pause := fs.Duration("pause", defaultPause,
+		"shorten any silence longer than this before transcribing; 0 to leave the audio alone")
 	fs.Parse(args)
 	if *lang == "list" {
 		listLanguages()
@@ -90,7 +93,7 @@ func runTranscribe(args []string) {
 	clip := time.Duration(len(samples)) * time.Second / transcript.SampleRate
 	log.Printf("%s of audio, %s", clip.Round(time.Second), p.Name)
 
-	turns := run(p, samples, clip, *chunk, *lang, *diarizer, speakers)
+	turns := run(p, samples, clip, *chunk, *lang, *diarizer, speakers, *pause)
 	// The entry's speaker cap belongs to the diarizer it names, so it says
 	// nothing about a run that was given a different one.
 	cap := p.Speakers
@@ -150,23 +153,44 @@ func listLanguages() {
 // The models load one at a time and the diarizer is closed before the words
 // model opens, since the card holds one of these at once and neither needs the
 // other resident: the speaker rows are the only thing that crosses.
-func run(p models.Pipeline, samples []float32, clip, chunk time.Duration, language, diarizer string, speakers int) []transcript.Turn {
+// defaultPause is what a silence longer than it is shortened to.
+//
+// A model is paid by the second and dead air costs the same as speech, so the
+// long gaps are worth taking out; see internal/silence for what that is worth
+// against each model. A second is inside the range of an ordinary pause
+// between utterances, which is what a shortened one has to look like: much
+// below it the speech either side starts to abut, and models hear that.
+//
+// The paragraph rule is not affected, and this is why the timeline exists:
+// every stamp is put back into the recording's own time before anything reads
+// a gap, so a pause that was thirty seconds still reads as thirty.
+const defaultPause = time.Second
+
+func run(p models.Pipeline, samples []float32, clip, chunk time.Duration, language, diarizer string,
+	speakers int, pause time.Duration) []transcript.Turn {
+	// Where the speech is, wanted for two different reasons: the clustering
+	// diarizer embeds only windows inside it, and the silences between are
+	// what gets shortened.
+	speech := speechIn(p, samples, clip)
+	samples, speech, line := shorten(samples, speech, pause)
+	clip = time.Duration(len(samples)) * time.Second / transcript.SampleRate
+
 	// A diarizer named outright replaces whatever the entry carries, and gives
 	// one to an entry that has none. The menu is a set of pairings known to
 	// work; this is for a model that is not in it yet, which is every model the
 	// week it is published.
 	if diarizer != "" {
-		rows := speakerRows(diarizer, samples, clip, speechIn(p, samples, clip), speakers)
+		rows := speakerRows(diarizer, samples, clip, speech, speakers, line)
 		model := load(p.Models[0])
 		defer model.Close()
-		spans := spansOf(model, samples, piece(p, model, clip, chunk), language)
+		spans := spansOf(model, samples, piece(p, model, clip, chunk), language, line)
 		return transcript.Attribute(spans, rows)
 	}
 	if len(p.Models) == 2 {
-		rows := speakerRows(p.Models[1].Path(), samples, clip, speechIn(p, samples, clip), speakers)
+		rows := speakerRows(p.Models[1].Path(), samples, clip, speech, speakers, line)
 		model := load(p.Models[0])
 		defer model.Close()
-		spans := spansOf(model, samples, piece(p, model, clip, chunk), language)
+		spans := spansOf(model, samples, piece(p, model, clip, chunk), language, line)
 		return transcript.Attribute(spans, rows)
 	}
 	model := load(p.Models[0])
@@ -182,7 +206,37 @@ func run(p models.Pipeline, samples []float32, clip, chunk time.Duration, langua
 		log.Fatalf("%s decides its own speakers and cannot be told how many;"+
 			" pick an entry with a clustering diarizer, such as %q", p.Name, models.Diarizers[0].Name)
 	}
-	return transcribeWhole(p, model, samples, piece(p, model, clip, chunk), language)
+	return transcribeWhole(p, model, samples, piece(p, model, clip, chunk), language, line)
+}
+
+// shorten takes the long silences out of the audio a model is about to be paid
+// by the second to listen to, and returns the map back into the recording's
+// own time.
+//
+// Only the audio handed to a model is shortened. Everything a reader sees --
+// the timestamps, the paragraph breaks, the turns file -- is in the time of
+// the recording somebody made, which is what the timeline is for.
+func shorten(samples []float32, speech []transcribe.Span, pause time.Duration) (
+	[]float32, []transcribe.Span, silence.Timeline) {
+	if pause <= 0 || len(speech) == 0 {
+		return samples, speech, silence.Timeline{}
+	}
+	gaps := make([]silence.Span, len(speech))
+	for i, s := range speech {
+		gaps[i] = silence.Span{Start: s.Start, End: s.End}
+	}
+	out, moved, line := silence.Compress(samples, transcript.SampleRate, gaps, pause)
+	if line.Removed() == 0 {
+		return samples, speech, line
+	}
+	shifted := make([]transcribe.Span, len(moved))
+	for i, m := range moved {
+		shifted[i] = transcribe.Span{Start: m.Start, End: m.End}
+	}
+	log.Printf("  %s of silence shortened away, leaving %s to transcribe",
+		line.Removed().Round(time.Second),
+		(time.Duration(len(out)) * time.Second / transcript.SampleRate).Round(time.Second))
+	return out, shifted, line
 }
 
 // load opens one of a pipeline's models and says what it cost.
@@ -280,7 +334,8 @@ func speechIn(p models.Pipeline, samples []float32, clip time.Duration) []transc
 	return speech
 }
 
-func speakerRows(path string, samples []float32, clip time.Duration, speech []transcribe.Span, speakers int) []transcript.Row {
+func speakerRows(path string, samples []float32, clip time.Duration, speech []transcribe.Span,
+	speakers int, line silence.Timeline) []transcript.Row {
 	model := loadPath(path)
 	defer model.Close()
 	if !model.Supports(transcribe.FeatureDiarization) {
@@ -318,7 +373,8 @@ func speakerRows(path string, samples []float32, clip time.Duration, speech []tr
 	rows := make([]transcript.Row, 0, len(res.SpeakerSegments))
 	seen := map[int]bool{}
 	for _, r := range res.SpeakerSegments {
-		rows = append(rows, transcript.Row{Speaker: r.Speaker, Start: r.Start, End: r.End})
+		rows = append(rows, transcript.Row{Speaker: r.Speaker,
+			Start: line.Original(r.Start), End: line.Original(r.End)})
 		seen[r.Speaker] = true
 	}
 	log.Printf("  %d speakers in %s, diarized in %s", len(seen), clip.Round(time.Second),
@@ -333,7 +389,8 @@ func speakerRows(path string, samples []float32, clip time.Duration, speech []tr
 // The difference is how precisely a change of speaker can be placed, and it is
 // the reason `cmd/caps` exists: of the models here only the parakeets stamp per
 // token.
-func spansOf(model *asr.Model, samples []float32, limit time.Duration, language string) []transcript.Span {
+func spansOf(model *asr.Model, samples []float32, limit time.Duration, language string,
+	line silence.Timeline) []transcript.Span {
 	opts := &transcribe.RunOptions{PNC: transcribe.ModeOn, Language: language}
 	if model.MaxTimestamps() == transcribe.StampsWord {
 		opts.Timestamps = transcribe.StampsWord
@@ -341,7 +398,7 @@ func spansOf(model *asr.Model, samples []float32, limit time.Duration, language 
 
 	var spans []transcript.Span
 	for _, r := range pieces(samples, limit) {
-		spans = append(spans, spansIn(transcribeAt(model, samples[r.from:r.to], r.at, opts), r.at)...)
+		spans = append(spans, spansIn(transcribeAt(model, samples[r.from:r.to], r.at, opts), r.at, line)...)
 	}
 	return spans
 }
@@ -349,12 +406,17 @@ func spansOf(model *asr.Model, samples []float32, limit time.Duration, language 
 // spansIn is one run's text, as finely as it stamped: words where it has them,
 // segments where it stops there. at is where this piece starts in the
 // recording, since a model is handed one piece and stamps from zero.
-func spansIn(res transcribe.Result, at time.Duration) []transcript.Span {
+func spansIn(res transcribe.Result, at time.Duration, line silence.Timeline) []transcript.Span {
+	// Every stamp is put back into the recording's own time here, at the seam
+	// where a model's answer becomes the program's. Nothing above this line
+	// knows the audio was shortened, which is what keeps the paragraph rule
+	// reading the pause somebody actually left.
+	back := func(d time.Duration) time.Duration { return line.Original(at + d) }
 	var spans []transcript.Span
 	if len(res.Words) > 0 {
 		for _, w := range res.Words {
 			if text := strings.TrimSpace(w.Text); text != "" {
-				spans = append(spans, transcript.Span{Start: at + w.Start, End: at + w.End,
+				spans = append(spans, transcript.Span{Start: back(w.Start), End: back(w.End),
 					Text: text, Stream: stream(res, w.Segment)})
 			}
 		}
@@ -362,7 +424,7 @@ func spansIn(res transcribe.Result, at time.Duration) []transcript.Span {
 	}
 	for i, s := range res.Segments {
 		if text := strings.TrimSpace(s.Text); text != "" {
-			spans = append(spans, transcript.Span{Start: at + s.Start, End: at + s.End,
+			spans = append(spans, transcript.Span{Start: back(s.Start), End: back(s.End),
 				Text: text, Stream: stream(res, i)})
 		}
 	}
@@ -439,7 +501,7 @@ func transcribeAt(model *asr.Model, samples []float32, at time.Duration, opts *t
 // is what every paired entry in the menu already does. So this refuses rather
 // than doing it badly, and names the entry that does it properly.
 func transcribeWhole(p models.Pipeline, model *asr.Model, samples []float32, limit time.Duration,
-	language string) []transcript.Turn {
+	language string, line silence.Timeline) []transcript.Turn {
 	if cuts := pieces(samples, limit); len(cuts) > 1 {
 		log.Fatalf("%s attributes speakers itself and numbers them from one in every piece,"+
 			" so a recording it cannot hold in one pass comes back with the same person"+
@@ -455,7 +517,7 @@ func transcribeWhole(p models.Pipeline, model *asr.Model, samples []float32, lim
 	if model.MaxTimestamps() == transcribe.StampsWord {
 		opts.Timestamps = transcribe.StampsWord
 	}
-	return turnsIn(transcribeAt(model, samples, 0, opts), 0, 0)
+	return turnsIn(transcribeAt(model, samples, 0, opts), 0, line)
 }
 
 // pairedWith is the menu entry that transcribes with the same model and takes
@@ -487,26 +549,12 @@ func pairedWith(p models.Pipeline) string {
 //
 // A model that gives one but not the other keeps its segments, which is the
 // best that can be done with them.
-func turnsIn(res transcribe.Result, at, from time.Duration) []transcript.Turn {
-	spans := spansIn(res, at)
-	if from > 0 {
-		// The lead-in, which the piece before this one already transcribed.
-		// Dropped word by word rather than turn by turn: a turn that starts in
-		// the lead-in and runs past it is one somebody went on talking
-		// through, and dropping the whole of it loses everything they said
-		// after the boundary. On a three minute piece that is however long
-		// they held the floor.
-		kept := spans[:0:0]
-		for _, s := range spans {
-			if s.Start >= from {
-				kept = append(kept, s)
-			}
-		}
-		spans = kept
-	}
+func turnsIn(res transcribe.Result, at time.Duration, line silence.Timeline) []transcript.Turn {
+	spans := spansIn(res, at, line)
 	var rows []transcript.Row
 	for _, r := range res.SpeakerSegments {
-		rows = append(rows, transcript.Row{Speaker: r.Speaker, Start: at + r.Start, End: at + r.End})
+		rows = append(rows, transcript.Row{Speaker: r.Speaker,
+			Start: line.Original(at + r.Start), End: line.Original(at + r.End)})
 	}
 	if len(spans) > 0 && len(rows) > 0 {
 		// Deduped first: separating speakers by masking the audio leaks, so a
@@ -520,7 +568,8 @@ func turnsIn(res transcribe.Result, at, from time.Duration) []transcript.Turn {
 			continue
 		}
 		turns = append(turns, transcript.Turn{Speaker: s.Speaker,
-			Start: at + s.Start, End: at + s.End, Text: strings.TrimSpace(s.Text)})
+			Start: line.Original(at + s.Start), End: line.Original(at + s.End),
+			Text: strings.TrimSpace(s.Text)})
 	}
 	return turns
 }

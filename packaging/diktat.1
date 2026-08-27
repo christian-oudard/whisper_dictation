@@ -79,6 +79,16 @@ of speakers and refuse it rather than ignoring it. Worth giving: the estimate
 cannot tell one person recorded two ways from two people, and on three voices
 it has split one of them in two.
 .TP
+.BI \-pause " duration"
+Shorten any silence longer than this before transcribing, one second by
+default, or
+.B 0
+to leave the audio alone. A model is paid by the second and dead air costs the
+same as speech; the detector that finds the speech costs a fifth of what
+transcribing it does. Only the audio a model is given is shortened \(em every
+timestamp, paragraph break and speaker turn is in the time of the recording
+you made.
+.TP
 .BI \-chunk " duration"
 The longest piece to transcribe at once. The default is what the pipeline can
 hold.

@@ -7,6 +7,7 @@ import (
 	transcribe "github.com/handy-computer/transcribe.cpp/bindings/go"
 
 	"github.com/christian-oudard/diktat/internal/models"
+	"github.com/christian-oudard/diktat/internal/silence"
 )
 
 // One run of a model that decodes a stream per speaker: two segments, the
@@ -37,7 +38,7 @@ func twoStreams() transcribe.Result {
 // talking throughout and then the other. Its words and the diarizer's rows say
 // better, and both are in the same result.
 func TestTurnsInOrdersByTime(t *testing.T) {
-	turns := turnsIn(twoStreams(), 0, 0)
+	turns := turnsIn(twoStreams(), 0, silence.Timeline{})
 	if len(turns) != 3 {
 		t.Fatalf("%d turns, want three: %+v", len(turns), turns)
 	}
@@ -49,22 +50,6 @@ func TestTurnsInOrdersByTime(t *testing.T) {
 			t.Errorf("turn %d is S%d %q, want S%d %q", i, turns[i].Speaker, turns[i].Text,
 				want.speaker, want.text)
 		}
-	}
-}
-
-// A piece repeats the tail of the one before it so the two can be matched on
-// what both heard, and that lead-in is then dropped. Word by word: a turn that
-// starts in the lead-in and runs past it is one somebody went on talking
-// through, and dropping the whole turn loses everything after the boundary --
-// which cost twenty-seven seconds of a piece measured at three minutes.
-func TestTurnsInDropsOnlyTheLeadIn(t *testing.T) {
-	turns := turnsIn(twoStreams(), 0, 2*time.Second)
-	var text string
-	for _, turn := range turns {
-		text += turn.Text + "|"
-	}
-	if text != "there|hi|goodbye|" {
-		t.Errorf("kept %q, want everything from two seconds on", text)
 	}
 }
 

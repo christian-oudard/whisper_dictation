@@ -92,6 +92,7 @@ _diktat() {
                 '-model[pipeline to transcribe with]:pipeline:_diktat_tx_models' \
                 '-diarizer[attribute speakers with this GGUF]:gguf:_files -g "*.gguf"' \
                 '-lang[language of the recording, or "list"]:language:' \
+                '-pause[shorten any silence longer than this]:duration:' \
                 '-chunk[longest piece to transcribe at once]:duration:' \
                 '*:recording:_files'
             ;;
