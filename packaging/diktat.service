@@ -1,0 +1,24 @@
+[Unit]
+# The daemon types into a graphical session and holds a speech model for as
+# long as one lasts, so its lifetime is the session's: PartOf stops it when the
+# session goes. Not default.target, which the user manager reaches on any
+# login, including one over ssh, where this would load a model and wait for a
+# compositor that is never coming.
+Description=diktat dictation daemon
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/diktat daemon
+# It never exits on its own, so an exit is a failure.
+Restart=on-failure
+RestartSec=2
+# EX_CONFIG. A config file only a person can fix, so restarting would bury the
+# reason in the journal.
+RestartPreventExitStatus=78
+
+[Install]
+# Every session a display manager starts reaches this target, on X11 and
+# Wayland alike, so this one line covers GNOME, KDE, sway and the rest. A
+# compositor started from a tty does not reach it and starts the service by
+# name instead; see the README.
+WantedBy=graphical-session.target

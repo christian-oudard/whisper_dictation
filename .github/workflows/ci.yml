@@ -1,0 +1,100 @@
+name: build
+
+# What this exists to catch is not what the unit tests catch. The tests need no
+# model, no microphone and no compositor, and they pass on a machine where the
+# speech library will not build at all. This builds the thing a distribution
+# would build, on a machine that has nothing installed, which is the one check
+# a developer's own machine cannot perform.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The route every non-Nix distribution takes: build libtranscribe from
+  # source, link it statically, run the tests that need nothing.
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: diktat
+
+      - name: Check out the speech library
+        uses: actions/checkout@v4
+        with:
+          repository: christian-oudard/transcribe.cpp
+          path: transcribe.cpp
+          submodules: recursive
+
+      - name: Install what the build needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config \
+            libvulkan-dev glslang-tools \
+            libasound2-dev libpipewire-0.3-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: diktat/go.mod
+
+      - name: Build
+        working-directory: diktat
+        run: |
+          TRANSCRIBE_SRC=$GITHUB_WORKSPACE/transcribe.cpp \
+          BUILD_DIR=$GITHUB_WORKSPACE/transcribe-build \
+          VERSION=ci \
+          OUT=$GITHUB_WORKSPACE/diktat-bin \
+            sh packaging/build.sh
+
+      - name: The binary runs and knows what it is
+        run: $GITHUB_WORKSPACE/diktat-bin version
+
+      - name: The shell completion still reads the menus
+        run: |
+          sudo apt-get install -y --no-install-recommends zsh
+          ln -s "$GITHUB_WORKSPACE/diktat-bin" "$GITHUB_WORKSPACE/diktat"
+          PATH="$GITHUB_WORKSPACE:$PATH" zsh diktat/completions/check.zsh
+
+      - name: Test
+        working-directory: diktat
+        run: go test ./...
+
+  # The Nix route, which takes the library from the flake input rather than
+  # building it here. It is also the only job that checks the flake still
+  # evaluates, which nothing else would notice until someone tried to install.
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - run: nix build --print-build-logs
+      - run: ./result/bin/diktat version
+
+  # Packaging metadata is text that other programs parse, and it is wrong in
+  # ways that only those programs see. None of this builds a package; it checks
+  # that the recipes are the shape their tools expect.
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev rpm shellcheck groff
+      - name: The Debian changelog parses
+        run: dpkg-parsechangelog -l packaging/debian/changelog -S Version
+      - name: The RPM spec parses
+        run: rpmspec -P packaging/rpm/diktat.spec > /dev/null
+      - name: The build recipe is sound shell
+        run: shellcheck --shell=sh packaging/build.sh
+      - name: The PKGBUILD is sound shell
+        run: bash -n packaging/aur/PKGBUILD
+      - name: The manual page renders without complaint
+        run: groff -man -ww -z packaging/diktat.1

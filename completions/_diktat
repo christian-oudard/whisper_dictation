@@ -34,6 +34,34 @@ _diktat_models() {
     _describe 'model' names
 }
 
+# Pipelines come from `diktat tx-model`, and are offered by number rather than
+# by name: an entry is called "parakeet-tdt-0.6b-v2 + sortformer", which is two
+# words and needs quoting on the command line, where the number is what the
+# menu is read for anyway. The name goes in the description.
+#
+# The table is followed by a blank line and then a note per entry, and a note
+# line is the same shape as an unmarked menu row, so the blank line is where
+# this stops rather than trying to tell prose from a pipeline.
+#
+# The name is taken as what lies between the number and the size, rather than
+# as a column of a fixed width: a name longer than its column pushes every
+# column after it along, and the longest entry here is longer than its column.
+_diktat_tx_models() {
+    local -a entries
+    entries=(${(f)"$(diktat tx-model 2>/dev/null | awk '
+        NR == 1 { next }
+        NF == 0 { exit }
+        {
+            n = ($1 ~ /^[0-9]+$/) ? $1 : $2
+            name = $0
+            sub(/^.? *[0-9]+ +/, "", name)
+            sub(/ +[0-9.]+ [KMG]iB.*$/, "", name)
+            gsub(/:/, "\\:", name)
+            print n ":" name
+        }')"})
+    _describe -V 'pipeline' entries
+}
+
 _diktat() {
     _arguments -C '1: :->command' '*:: :->args'
 
@@ -48,6 +76,23 @@ _diktat() {
             if (( CURRENT == 2 )); then
                 _diktat_models
             fi
+            ;;
+        tx-model)
+            if (( CURRENT == 2 )); then
+                _diktat_tx_models
+            fi
+            ;;
+        transcribe)
+            # Any file ffmpeg reads, or a turns file from an earlier run, so
+            # the recording is not filtered by extension.
+            _arguments \
+                '-o[write the transcript here]:path:_files' \
+                '-timestamps[put the time of each turn in the document]' \
+                '-model[pipeline to transcribe with]:pipeline:_diktat_tx_models' \
+                '-diarizer[attribute speakers with this GGUF]:gguf:_files -g "*.gguf"' \
+                '-lang[language of the recording, or "list"]:language:' \
+                '-chunk[longest piece to transcribe at once]:duration:' \
+                '*:recording:_files'
             ;;
         esac
         ;;

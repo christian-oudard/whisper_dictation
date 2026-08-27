@@ -1,0 +1,49 @@
+Source: diktat
+Section: sound
+Priority: optional
+Maintainer: Diktat maintainers <noreply@example.com>
+Build-Depends: debhelper-compat (= 13),
+               golang-go (>= 2:1.22~),
+               cmake,
+               git,
+               pkg-config,
+               libvulkan-dev,
+               glslang-tools,
+               libasound2-dev,
+               libpipewire-0.3-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/christian-oudard/diktat
+Rules-Requires-Root: no
+
+Package: diktat
+Architecture: amd64
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         espeak-ng,
+         ffmpeg,
+         libvulkan1
+Recommends: wtype | ydotool | xdotool,
+            wl-clipboard | xclip | xsel
+Suggests: sway, hyprland
+Description: voice dictation that types where you are looking
+ Press a key, speak, press it again, and the words are typed into whatever
+ window has focus. The daemon holds one speech model for the whole session, so
+ a dictation costs the time it takes to say it and not the time it takes to
+ load a model.
+ .
+ Speech recognition runs locally on the CPU or, where one is present, a Vulkan
+ GPU; no audio leaves the machine and nothing needs a network after the model
+ has been fetched. Models are downloaded on request into the user's cache,
+ never at install time.
+ .
+ It can also transcribe a recording into a document that says who spoke, by
+ clustering speaker embeddings rather than by a model with a fixed number of
+ speakers in it, so a recording of a dozen people is a document about a dozen
+ people.
+ .
+ Typing has no portable tool on Linux: wtype covers the wlroots compositors
+ (sway, Hyprland, river, wayfire, labwc, niri), ydotool covers GNOME and KDE
+ through the kernel's uinput device, and xdotool covers X11. The clipboard,
+ which the paste methods borrow, is wl-clipboard on Wayland and xclip or xsel
+ on X11. Install whichever suits the desktop -- diktat tries them in order and
+ says which are missing.

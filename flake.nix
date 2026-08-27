@@ -21,6 +21,10 @@
         pkgs.espeak-ng
         pkgs.wl-clipboard
         pkgs.sway
+        # `diktat transcribe` takes a recording in whatever format the thing
+        # that made it writes, and converts anything that is not already a
+        # 16 kHz WAV; see internal/wav/decode.go.
+        pkgs.ffmpeg
       ];
       runtimeBin = pkgs.lib.makeBinPath runtimeDeps;
 
@@ -59,10 +63,13 @@
     {
       packages.${system}.default = pkgs.buildGoModule {
         pname = "diktat";
-        version = "0.2.0";
+        version = "1.0.0";
         src = ./.;
         vendorHash = null;
         ldflags = [
+          # What the release is called, and what it was built from. A package
+          # has both; a build from a working tree has only the second.
+          "-X main.version=1.0.0"
           "-X main.gitRev=${gitRev}"
           "-X main.gitDate=${gitDate}"
         ];

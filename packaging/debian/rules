@@ -1,0 +1,40 @@
+#!/usr/bin/make -f
+# Build with the shared recipe in packaging/build.sh rather than a copy of it:
+# which archives and system libraries to link against come from the library's
+# own manifest, and that logic lives in one place for every distribution.
+
+# There is no libtranscribe package in Debian, so the speech library is built
+# from a source tree beside this one and linked statically. TRANSCRIBE_SRC is
+# where the orig tarball or the packaging branch put it.
+TRANSCRIBE_SRC ?= $(CURDIR)/third_party/transcribe.cpp
+VERSION := $(shell dpkg-parsechangelog -S Version | cut -d- -f1)
+
+# A Debian build has no network and no writable HOME: Go's dependencies are
+# vendored in the tree, and its caches are pointed inside the build directory.
+export GOFLAGS = -mod=vendor
+export GOCACHE = $(CURDIR)/.gocache
+export GOMODCACHE = $(CURDIR)/.gomodcache
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	TRANSCRIBE_SRC=$(TRANSCRIBE_SRC) \
+	BUILD_DIR=$(CURDIR)/.transcribe-build \
+	VERSION=$(VERSION) \
+	DIKTAT_REV=$(VERSION) \
+	OUT=$(CURDIR)/diktat \
+		sh packaging/build.sh
+
+override_dh_auto_test:
+	# Everything that needs no model, microphone or compositor.
+	go test ./internal/...
+
+override_dh_auto_install:
+	install -Dm755 diktat debian/diktat/usr/bin/diktat
+	install -Dm644 packaging/diktat.service debian/diktat/usr/lib/systemd/user/diktat.service
+	install -Dm644 completions/_diktat debian/diktat/usr/share/zsh/vendor-completions/_diktat
+	install -Dm644 packaging/diktat.1 debian/diktat/usr/share/man/man1/diktat.1
+
+override_dh_auto_clean:
+	rm -rf .gocache .gomodcache .transcribe-build diktat
