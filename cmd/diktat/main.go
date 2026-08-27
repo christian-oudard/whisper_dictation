@@ -11,14 +11,20 @@ type command struct {
 	usage   string
 	summary string
 	run     func(args []string)
+	// hidden keeps a command out of the usage text, and so out of the zsh
+	// completion, which reads the command list back out of --help. For one
+	// nobody has to find while dictating, only when reporting something the
+	// README will have pointed them at.
+	hidden bool
 }
 
 var commands = []command{
-	{"daemon", "", "Run the Diktat voice transcription daemon.", runDaemon},
-	{"toggle", "", "Start or stop recording.", runToggle},
-	{"repeat", "", "Repeat the last transcription, typing the text again.", runRepeat},
-	{"model", "[<model>]", "List, switch, or fetch voice transcription models.", runModel},
-	{"version", "", "Report the build, and whether the daemon matches it.", runVersion},
+	{"daemon", "", "Run the Diktat voice transcription daemon.", runDaemon, false},
+	{"toggle", "", "Start or stop recording.", runToggle, false},
+	{"repeat", "", "Repeat the last transcription, typing the text again.", runRepeat, false},
+	{"model", "[<model>]", "List, switch, or fetch voice transcription models.", runModel, false},
+	{"version", "", "Report the build, and whether the daemon matches it.", runVersion, false},
+	{"doctor", "", "Report this machine, for a bug report.", runDoctor, true},
 }
 
 func main() {
@@ -58,6 +64,9 @@ func usage(w *os.File) {
 	fmt.Fprintln(w, "usage: diktat <command> [args]")
 	fmt.Fprintln(w)
 	for _, c := range commands {
+		if c.hidden {
+			continue
+		}
 		fmt.Fprintf(w, "  %-7s %-30s %s\n", c.name, c.usage, c.summary)
 	}
 }

@@ -450,18 +450,76 @@ func placement() (*transcribe.LoadOptions, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	for i, d := range devices {
-		if d.Type != transcribe.DeviceGPU {
-			continue
-		}
-		// Index 0 is not selectable explicitly, since zero means auto, but
-		// a device that is first in probe order is what auto picks anyway.
-		if i == 0 {
-			return nil, d.Description, nil
-		}
-		return &transcribe.LoadOptions{GPUDevice: i}, d.Description, nil
+	i := discrete(devices)
+	if i < 0 {
+		return &transcribe.LoadOptions{Backend: transcribe.BackendCPU}, "", nil
 	}
-	return &transcribe.LoadOptions{Backend: transcribe.BackendCPU}, "", nil
+	// Index 0 is not selectable explicitly, since zero means auto, but a
+	// device that is first in probe order is what auto picks anyway.
+	if i == 0 {
+		return nil, devices[0].Description, nil
+	}
+	return &transcribe.LoadOptions{GPUDevice: i}, devices[i].Description, nil
+}
+
+// discrete is the index of the first discrete GPU, or -1 when the machine has
+// none. Integrated devices are skipped rather than ranked, for the reason
+// placement gives.
+func discrete(devices []transcribe.Device) int {
+	for i, d := range devices {
+		if d.Type == transcribe.DeviceGPU {
+			return i
+		}
+	}
+	return -1
+}
+
+// Device is one compute device as the library reports it.
+//
+// Kind and Type are both here and are not the same question. Kind is the
+// backend that owns it, so two devices on one machine both read "vulkan";
+// Type is gpu, igpu, cpu or accel, which is what placement branches on. A
+// report that carried only Kind could not show a hybrid laptop's integrated
+// chip beside its discrete one, which is the case the policy exists for.
+type Device struct {
+	Index                   int
+	Name, Description, Kind string
+	Type                    string
+	MemoryTotal, MemoryFree uint64
+}
+
+// Devices lists what the backends registered, for a report on a machine
+// nobody here can run. The policy that picks among them is Chosen; this is
+// the evidence behind it, including devices the policy skipped.
+func Devices() ([]Device, error) {
+	quiet.Do(keepComplaints)
+	devices, err := transcribe.Devices()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Device, len(devices))
+	for i, d := range devices {
+		out[i] = Device{
+			Index: i, Name: d.Name, Description: d.Description, Kind: d.Kind,
+			Type:        d.Type.String(),
+			MemoryTotal: d.MemoryTotal, MemoryFree: d.MemoryFree,
+		}
+	}
+	return out, nil
+}
+
+// Chosen names the device a load would land on now, or "" for the CPU. It
+// answers through placement rather than beside it, so a report cannot
+// disagree with what a load actually does.
+//
+// Both this and Devices take the library's narration off stderr first, the
+// same as Load. They are the only other callers that reach a backend, and
+// without it the first device query of the process prints ggml's device
+// summary into the middle of whatever was being written.
+func Chosen() (string, error) {
+	quiet.Do(keepComplaints)
+	_, name, err := placement()
+	return name, err
 }
 
 // Name is the model, as the file it was loaded from calls it.

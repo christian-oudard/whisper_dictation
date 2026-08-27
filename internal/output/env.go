@@ -31,15 +31,19 @@ import (
 // WAYLAND_DISPLAY and SWAYSOCK when they are not already set. An inherited
 // value wins: a `diktat repeat` bound to a key runs inside the session and
 // already knows, and so does a daemon started by hand from a terminal.
-func waylandEnv() ([]string, error) {
+//
+// The display is returned beside the environment as well as in it, since the
+// input method connects to the compositor from this process rather than
+// spawning something that reads the variable.
+func waylandEnv() ([]string, string, error) {
 	env := os.Environ()
 	sock, display := os.Getenv("SWAYSOCK"), os.Getenv("WAYLAND_DISPLAY")
 	if sock != "" && display != "" {
-		return env, nil
+		return env, display, nil
 	}
 	path, pid, err := swaySocket()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if sock == "" {
 		env = append(env, "SWAYSOCK="+path)
@@ -51,11 +55,11 @@ func waylandEnv() ([]string, error) {
 		// matches the socket just picked is the one sway itself is using.
 		display, err = procEnv(pid, "WAYLAND_DISPLAY")
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		env = append(env, "WAYLAND_DISPLAY="+display)
 	}
-	return env, nil
+	return env, display, nil
 }
 
 // swaySocket returns the live sway IPC socket and the PID of the compositor

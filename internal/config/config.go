@@ -18,9 +18,12 @@ type Config struct {
 	// Model the daemon starts on. `diktat model` switches the running daemon
 	// without touching this, so a restart comes back to a known model rather
 	// than to whatever was last selected.
-	Model        string            `toml:"model"`
-	PasteMethods map[string]string `toml:"paste_methods"`
-	HistoryFile  HistoryFile       `toml:"history_file"`
+	Model string `toml:"model"`
+	// TypingMethods names how to get text into an app that is slow to accept
+	// it a keystroke at a time. Keyed by sway app_id; every value today is a
+	// paste chord, since pasting is the only alternative there is so far.
+	TypingMethods map[string]string `toml:"typing_methods"`
+	HistoryFile   HistoryFile       `toml:"history_file"`
 }
 
 // HistoryFile is where each transcription is appended, or empty for nowhere.
@@ -30,7 +33,7 @@ type Config struct {
 // nobody a decision about where to put it. Both halves of that matter: on or
 // off is what a person reaches for first, and a key that takes only a path
 // answers `false` by failing to parse the whole file, taking every other
-// setting down with it. That is how a working paste_methods table went
+// setting down with it. That is how a working typing_methods table went
 // quietly missing and every dictation went back to being typed one character
 // at a time.
 type HistoryFile string

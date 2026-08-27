@@ -16,15 +16,21 @@ var (
 	gitDate = ""
 )
 
-func runVersion(args []string) {
-	log.SetFlags(0)
+// build names this binary's revision and when it was built. Shared with
+// doctor, whose report means something different against a different build
+// and which is the fact most likely to be left out of one.
+func build() string {
 	// Stamped as RFC3339 in UTC, because ldflags cannot carry a space and the
 	// build clock is UTC. Show it in the reader's own timezone.
 	if t, err := time.Parse(time.RFC3339, gitDate); err == nil {
-		fmt.Printf("diktat %s (%s)\n", gitRev, t.Local().Format("2006-01-02 15:04"))
-	} else {
-		fmt.Printf("diktat %s\n", gitRev)
+		return fmt.Sprintf("%s (%s)", gitRev, t.Local().Format("2006-01-02 15:04"))
 	}
+	return gitRev
+}
+
+func runVersion(args []string) {
+	log.SetFlags(0)
+	fmt.Printf("diktat %s\n", build())
 
 	// Only worth a second line when the running daemon is some other build, in
 	// which case the revision above does not describe what is transcribing.

@@ -16,7 +16,7 @@ func write(t *testing.T, content string) string {
 }
 
 // history_file takes a path, or says yes or no. A bool that failed to parse
-// took the whole file with it, and with it a paste_methods table that had
+// took the whole file with it, and with it a typing_methods table that had
 // been working: every dictation went back to being typed a character at a
 // time, and the only word about it was a line in a log that was truncated at
 // every start.
@@ -51,7 +51,7 @@ func TestHistoryFile(t *testing.T) {
 func TestOneKeyDoesNotTakeTheFileWithIt(t *testing.T) {
 	cfg, unknown, err := Load(write(t, `history_file = false
 
-[paste_methods]
+[typing_methods]
 foot = "C-S-v"
 `))
 	if err != nil {
@@ -60,8 +60,8 @@ foot = "C-S-v"
 	if len(unknown) != 0 {
 		t.Errorf("unknown keys %v, want none", unknown)
 	}
-	if got := cfg.PasteMethods["foot"]; got != "C-S-v" {
-		t.Errorf("PasteMethods[foot] = %q, want %q", got, "C-S-v")
+	if got := cfg.TypingMethods["foot"]; got != "C-S-v" {
+		t.Errorf("TypingMethods[foot] = %q, want %q", got, "C-S-v")
 	}
 }
 

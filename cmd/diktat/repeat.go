@@ -28,7 +28,7 @@ func runRepeat(args []string) {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	if err := output.Type(string(raw), cfg.PasteMethods); err != nil {
+	if err := output.Type(string(raw), cfg.TypingMethods); err != nil {
 		log.Fatalf("type: %v", err)
 	}
 }

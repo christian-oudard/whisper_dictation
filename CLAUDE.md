@@ -84,6 +84,24 @@ wrapper sets no library-path variables beyond the audio and Vulkan loaders.
 External CLIs expected on PATH: `wtype`, `wl-copy`, `wl-paste`, `swaymsg`,
 `espeak-ng`. The last is the warmup's synthesised speech.
 
+Text reaches a window by one of three mechanisms, tried in that order.
+`internal/wayland` speaks the wire protocol directly and asks the compositor's
+input method to commit the whole string in one message, which is the only one
+of the three that is not pretending to be a keyboard: it goes in through the
+application's own text input path, so undo sees text rather than typing. That
+protocol is `zwp_input_method_manager_v2`, a wlroots one, so KWin and GNOME
+have nothing to answer with; another input method may hold the seat, since
+there may be only one per seat; and the focused window may have no text input
+at all. Each is an ordinary state of a working machine, so `Insert` returns a
+sentinel and the caller types instead. The connection is opened per insertion
+rather than held, because holding it would lock out fcitx5 and ibus for the
+session to save under a millisecond.
+
+`diktat doctor` reports which of the three this machine gets, and runs the
+input method handshake rather than inferring it from the advertised protocol.
+It is hidden from `--help`, and so from the completions that read the command
+list out of it; the README names it under bug reporting.
+
 The Wayland ones need `WAYLAND_DISPLAY` and `SWAYSOCK`. The daemon is a systemd
 user service wanted by `graphical-session.target`, and it inherits neither, so
 `internal/output/env.go` finds them in `XDG_RUNTIME_DIR` when it spawns a
@@ -372,7 +390,11 @@ beside this one, since go.mod resolves the bindings through a relative
   `$XDG_STATE_HOME/diktat/model` instead of writing here, since this file is
   hand-authored; that choice outranks this key, and deleting it restores this
   one.
-- `paste_methods` - map of sway app_id to paste key combo (`C-v`, `C-S-v`)
+- `typing_methods` - map of sway app_id to how text reaches it. Every value is
+  a paste key combo (`C-v`, `C-S-v`), since pasting is the only alternative to
+  wtype so far; the key is named for the choice rather than for today's answers
+  to it. Only consulted where the input method declined, since an entry
+  describes a slow keystroke path the input method does not use.
 - `history_file` - JSONL append target for each transcription. A path, `true`
   for `$XDG_STATE_HOME/diktat/history.jsonl`, or `false` for none, which is
   also what leaving the key out does. It holds what was said, so the file is
@@ -382,6 +404,6 @@ Unknown keys are reported rather than ignored, since TOML drops them silently
 and a key that had quietly stopped meaning anything sat in a real config
 looking like it worked. A key with the right name and the wrong type fails the
 whole decode, and every caller used to answer that by carrying on with an empty
-Config, so a bad `history_file` silently disabled the `paste_methods` below it.
+Config, so a bad `history_file` silently disabled the `typing_methods` below it.
 The daemon now stops on a config it cannot parse, with exit 78 (EX_CONFIG) so
 the unit does not restart it into the same failure.

@@ -69,4 +69,15 @@ bindsym XF86HangupPhone exec diktat repeat
 ```
 
 *To-Do*: key bindings for other window managers.
+
+
+## Reporting a bug
+
+Run `diktat doctor` from inside your graphical session and include what it
+prints. It reports the compositor, the Wayland protocols that compositor
+offers, which helper programs are installed, and what the speech model would
+run on. Those decide whether diktat can type at all, and they cannot be
+guessed from here.
+
+It reports; it does not change anything.
 ...

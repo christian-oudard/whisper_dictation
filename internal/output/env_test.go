@@ -84,9 +84,12 @@ func TestWaylandEnvKeepsInherited(t *testing.T) {
 	t.Setenv("SWAYSOCK", "/run/sway.sock")
 	t.Setenv("WAYLAND_DISPLAY", "wayland-9")
 
-	env, err := waylandEnv()
+	env, display, err := waylandEnv()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if display != "wayland-9" {
+		t.Errorf("display = %q, want the inherited value", display)
 	}
 	for _, want := range []string{"SWAYSOCK=/run/sway.sock", "WAYLAND_DISPLAY=wayland-9"} {
 		if count(env, want) != 1 {
@@ -102,12 +105,18 @@ func TestWaylandEnvFindsSocket(t *testing.T) {
 	t.Setenv("WAYLAND_DISPLAY", "wayland-9")
 	want := "SWAYSOCK=" + socket(t, dir, os.Getpid())
 
-	env, err := waylandEnv()
+	env, display, err := waylandEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if count(env, want) != 1 {
 		t.Errorf("waylandEnv() has %d of %q, want 1", count(env, want), want)
+	}
+	// Returned beside the environment as well as in it, since the input method
+	// connects from this process rather than spawning something that reads the
+	// variable.
+	if display != "wayland-9" {
+		t.Errorf("display = %q, want wayland-9", display)
 	}
 }
 

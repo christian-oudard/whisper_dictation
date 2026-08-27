@@ -1054,7 +1054,7 @@ func (d *daemon) stopRecording() {
 			log.Printf("last-text write: %v", err)
 		}
 		d.appendHistory(text)
-		if err := output.Type(out, d.cfg.PasteMethods); err != nil {
+		if err := output.Type(out, d.cfg.TypingMethods); err != nil {
 			log.Printf("type: %v", err)
 		}
 	}

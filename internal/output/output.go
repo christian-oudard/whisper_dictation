@@ -1,5 +1,7 @@
 // Package output types transcribed text via wtype, or pastes via the
-// clipboard for apps where wtype is too slow or doesn't take focus correctly.
+// clipboard for apps where wtype is too slow. Speed is the whole reason the
+// clipboard is involved at all: pasting touches state outside the target
+// window and typing does not, so nothing else would justify it.
 package output
 
 import (
@@ -7,29 +9,56 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
+
+	"github.com/christian-oudard/diktat/internal/wayland"
 )
 
-// pasteWtypeArgs maps a config-level paste-method label to the wtype argv
-// that performs that key chord.
-var pasteWtypeArgs = map[string][]string{
+// pasteChords maps a config-level typing-method label to the wtype argv that
+// performs that key chord.
+var pasteChords = map[string][]string{
 	"C-v":   {"-M", "ctrl", "v", "-m", "ctrl"},
 	"C-S-v": {"-M", "ctrl", "-M", "shift", "v", "-m", "shift", "-m", "ctrl"},
 }
 
-// Type sends text to the focused Wayland window. If the focused app's sway
-// app_id has an entry in pasteMethods, the clipboard paste flow is used;
-// otherwise wtype types the text directly.
-func Type(text string, pasteMethods map[string]string) error {
-	env, err := waylandEnv()
+// Type sends text to the focused Wayland window, by whichever of three
+// mechanisms the machine in front of it can manage.
+//
+// The compositor's input method is tried first and is the only one that is
+// not pretending to be a keyboard: it carries the whole string in one message,
+// inserted through the application's own text input path. It is unavailable
+// more often than not -- the protocol is a wlroots one, another input method
+// may hold the seat, and the focused window may have nowhere to put text --
+// and each of those is an ordinary state rather than a fault, so it falls
+// through rather than failing.
+//
+// wtype is the fallback, and it touches nothing outside the target window. It
+// synthesises a key press and release per character, and an app that runs its
+// full input handling on each one takes long enough over a dictation to be
+// worth working around, which is what typingMethods is for: an app_id listed
+// there gets a clipboard paste instead.
+//
+// The table is consulted only after the input method declines, since an entry
+// in it describes a slow keystroke path that the input method does not use.
+func Type(text string, typingMethods map[string]string) error {
+	env, display, err := waylandEnv()
 	if err != nil {
 		return err
 	}
+	if err := wayland.Insert(display, text); err == nil {
+		return nil
+	} else if !wayland.Unavailable(err) {
+		// The mechanism was there and failed anyway. Typing would probably
+		// work, but silently doing it would hide a broken input method for the
+		// life of the session.
+		return err
+	}
 	appID, _ := focusedAppID(env)
-	method, ok := pasteMethods[appID]
+	method, ok := typingMethods[appID]
 	if ok {
-		args, known := pasteWtypeArgs[method]
+		args, known := pasteChords[method]
 		if !known {
-			return fmt.Errorf("unknown paste method %q for app_id %q", method, appID)
+			return fmt.Errorf("unknown typing method %q for app_id %q", method, appID)
 		}
 		return paste(env, text, args)
 	}
@@ -44,16 +73,53 @@ func command(env []string, name string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// paste saves the clipboard, sets it to text, sends the paste chord, restores.
+// paste saves the clipboard, sets it to text, sends the paste chord, and puts
+// back what was there.
+//
+// Putting it back is conditional, because nothing sequences these programs
+// against the application being pasted into. wtype returns when the keystroke
+// is injected, not when the target has acted on it, so the restore races the
+// target's read of the clipboard. It wins in practice only because it is a
+// fresh process, and forking, linking and connecting to the compositor costs
+// more than the target needs to ask for the data. That is an accident of
+// process startup rather than a guarantee, and no guarantee is available from
+// these tools: knowing that a read happened means owning the selection in this
+// process, over wlr-data-control, rather than shelling out for it.
+//
+// What can be settled without any timing assumption is who owns the clipboard
+// now. If it no longer holds the dictation, something else took it, most
+// likely the user copying something while this was in flight, and their copy
+// outranks the one being put back.
 func paste(env []string, text string, chord []string) error {
 	saved, _ := command(env, "wl-paste", "--no-newline").Output()
 	if err := command(env, "wl-copy", "--", text).Run(); err != nil {
 		return fmt.Errorf("wl-copy: %w", err)
 	}
 	_ = command(env, "wtype", chord...).Run()
+	if !holds(env, text) {
+		return nil
+	}
 	restore := command(env, "wl-copy", "--")
 	restore.Stdin = bytes.NewReader(saved)
 	return restore.Run()
+}
+
+// holds reports whether the clipboard still carries text.
+//
+// Trailing newlines are ignored on both sides. wl-copy appends one to what it
+// is given and wl-paste --no-newline takes one off, so the two should cancel,
+// and a mismatch in that bookkeeping would not look like a mismatch: it would
+// silently stop the clipboard ever being restored, which is the failure this
+// whole function exists to avoid.
+//
+// An unreadable clipboard answers no. wl-paste fails on an empty one, and
+// empty is not what was put there either.
+func holds(env []string, text string) bool {
+	now, err := command(env, "wl-paste", "--no-newline").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimRight(string(now), "\n") == strings.TrimRight(text, "\n")
 }
 
 // focusedAppID returns the sway app_id of the focused window.
