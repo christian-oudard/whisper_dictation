@@ -36,10 +36,14 @@ const (
 	firstFreeID
 )
 
-// wl_display requests.
+// wl_display requests. Both spelled out: a bare name under a literal repeats
+// that literal rather than counting, so writing only the first made
+// get_registry a second sync. sway answered it the way it was asked, with a
+// callback and no registry, and every insertion since found no interfaces at
+// all and fell back to typing.
 const (
-	displaySync = 0
-	displayGetRegistry
+	displaySync        = 0
+	displayGetRegistry = 1
 )
 
 // wl_registry.bind, and the events both wl_display and wl_registry send as

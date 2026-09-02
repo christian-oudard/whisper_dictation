@@ -87,6 +87,37 @@ func TestBindSendsTheInterfaceBeforeTheID(t *testing.T) {
 	}
 }
 
+// The opcodes are checked against the numbers the protocol declares, not
+// against this package's own constants, because the constants were what was
+// wrong: get_registry was written as a bare name under a literal and repeated
+// it, so it was 0, so it was sync. sway made a callback, sent no globals, and
+// every insertion for the life of the feature fell back to typing.
+//
+// wl_display declares sync as request 0 and get_registry as request 1.
+func TestGlobalsAsksForARegistryAndNotASecondSync(t *testing.T) {
+	c, sent := replay(done(globalsSyncID))
+	if _, err := c.globals(globalsSyncID); err != nil {
+		t.Fatal(err)
+	}
+	first, err := readMsg(sent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.opcode != 1 {
+		t.Errorf("first request is opcode %d, want 1, wl_display.get_registry", first.opcode)
+	}
+	if id := order.Uint32(first.body); id != registryID {
+		t.Errorf("the registry is id %d, want %d", id, registryID)
+	}
+	second, err := readMsg(sent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.opcode != 0 {
+		t.Errorf("second request is opcode %d, want 0, wl_display.sync", second.opcode)
+	}
+}
+
 func TestGlobalsReadsToTheSyncCallback(t *testing.T) {
 	c, _ := replay(
 		globalEvent(1, "wl_seat", 9),
