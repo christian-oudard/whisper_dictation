@@ -17,6 +17,7 @@ package silence
 
 import (
 	"math"
+	"slices"
 	"time"
 )
 
@@ -104,7 +105,7 @@ func Compress(samples []float32, rate int, speech []Span, longest time.Duration)
 	}
 	gaps = append(gaps, Span{Start: speech[len(speech)-1].End, End: clip})
 
-	floor := level(samples, rate, speech)
+	floor := level(samples, rate, gaps)
 	out := make([]float32, 0, len(samples))
 	var line Timeline
 	removed := time.Duration(0)
@@ -144,25 +145,40 @@ func Compress(samples []float32, rate int, speech []Span, longest time.Duration)
 // word is several of them, long enough that one glottal stop is not a frame.
 const frame = 50 * time.Millisecond
 
-// level is the loudness below which audio is nothing worth keeping, taken
-// from the recording rather than assumed: a hundredth of what this speech is,
-// which is 40 dB down. A recording with no speech in it has no scale, and
-// gets a floor of zero, so only true digital silence is cut.
-func level(samples []float32, rate int, speech []Span) float64 {
-	var sum float64
-	var n int
-	for _, s := range speech {
-		from := int(s.Start * time.Duration(rate) / time.Second)
-		to := min(int(s.End*time.Duration(rate)/time.Second), len(samples))
-		for i := from; i < to; i++ {
-			sum += float64(samples[i]) * float64(samples[i])
-			n++
-		}
-	}
-	if n == 0 {
+// level is the loudness below which audio is the room rather than anybody in
+// it. Taken from the recording's own quiet, not from its speech: how far
+// speech sits above the noise is a property of the microphone and where it
+// was, and it varies by tens of decibels between a headset and a table in a
+// meeting room. A fixed fraction of the speech level therefore means "the
+// room" in one recording and "quiet speech" in another, and cutting the second
+// changed a tenth of the words.
+//
+// The room is the quarter-quietest frame of everything the detector did not
+// call speech, and what may be cut is 6 dB above that: loud enough to keep
+// anything with structure in it, quiet enough that a recorder left running in
+// an empty room is all removable.
+func level(samples []float32, rate int, gaps []Span) float64 {
+	width := int(frame) * rate / int(time.Second)
+	if width <= 0 {
 		return 0
 	}
-	return 0.01 * math.Sqrt(sum/float64(n))
+	var quiet []float64
+	for _, g := range gaps {
+		from := int(g.Start * time.Duration(rate) / time.Second)
+		to := min(int(g.End*time.Duration(rate)/time.Second), len(samples))
+		for at := from; at+width <= to; at += width {
+			var sum float64
+			for i := at; i < at+width; i++ {
+				sum += float64(samples[i]) * float64(samples[i])
+			}
+			quiet = append(quiet, math.Sqrt(sum/float64(width)))
+		}
+	}
+	if len(quiet) == 0 {
+		return 0
+	}
+	slices.Sort(quiet)
+	return 2 * quiet[len(quiet)/4]
 }
 
 // quiet narrows a range to the part of it that is actually quiet, dropping

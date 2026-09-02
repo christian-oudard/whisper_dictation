@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -389,6 +390,27 @@ func (m *Model) MaxTimestamps() transcribe.Timestamps {
 		return transcribe.StampsAuto
 	}
 	return c.MaxTimestamps
+}
+
+// FeatureStats are the per-mel-bin normalization statistics over a whole
+// recording, or nil for a model whose family does not compute them.
+//
+// A recording too long to transcribe in one pass is cut into pieces, and the
+// frontend normalizes each mel bin against the frames it is handed -- so a
+// piece is otherwise normalized against itself, and every frame in it differs
+// from what it would have been in a longer piece. Measured on an eighteen
+// minute meeting, that made 6 to 10 per cent of the words depend on nothing
+// but where the cuts fell. Computed once here and handed to every piece, a
+// piece comes out the same as that audio inside the whole recording.
+func (m *Model) FeatureStats(samples []float32) *transcribe.NormStats {
+	stats, err := m.s.Model().FeatureStats(samples)
+	if err != nil {
+		// Not fatal: the pieces fall back to normalizing themselves, which is
+		// what every version before this did.
+		log.Printf("feature stats: %v", err)
+		return nil
+	}
+	return stats
 }
 
 // Supports probes a behavioural toggle, such as whether the model attributes

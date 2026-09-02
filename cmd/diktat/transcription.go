@@ -396,8 +396,25 @@ func spansOf(model *asr.Model, samples []float32, limit time.Duration, language 
 		opts.Timestamps = transcribe.StampsWord
 	}
 
+	cuts := pieces(samples, limit)
+	// Normalization statistics from the whole recording, so every piece is
+	// normalized against the same numbers instead of against itself. Without
+	// this the transcript depends on where the cuts fell, by 6 to 10 per cent
+	// of the words on an eighteen minute meeting -- diffusely, through each
+	// piece, not at the seams.
+	//
+	// Only when there is more than one piece: a recording transcribed whole is
+	// already its own statistics, and the pass costs 2 ms per second of audio.
+	if len(cuts) > 1 {
+		t0 := time.Now()
+		if opts.Norm = model.FeatureStats(samples); opts.Norm != nil {
+			log.Printf("  normalizing %d pieces against the whole recording, measured in %s",
+				len(cuts), time.Since(t0).Round(time.Millisecond))
+		}
+	}
+
 	var spans []transcript.Span
-	for _, r := range pieces(samples, limit) {
+	for _, r := range cuts {
 		spans = append(spans, spansIn(transcribeAt(model, samples[r.from:r.to], r.at, opts), r.at, line)...)
 	}
 	return spans
