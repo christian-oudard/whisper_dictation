@@ -1,6 +1,9 @@
 package output
 
 import (
+	"encoding/binary"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -46,6 +49,60 @@ if [ $# -gt 0 ]; then printf '%s\n' "$*" > "$CLIP"; else cat > "$CLIP"; fi`)
 			t.Fatal(err)
 		}
 		return string(b)
+	}
+}
+
+// A compositor whose stream cannot be parsed must not cost the dictation: the
+// input method is one of three mechanisms and the other two still work. Three
+// dictations in a row were lost to exactly this before the fallback existed,
+// each to a registry frame the parser refused.
+func TestTypeFallsBackWhenTheInputMethodFails(t *testing.T) {
+	dir := t.TempDir()
+
+	// As much of a compositor as the failure needs: accept, then answer the
+	// handshake with a registry global event carrying a name and nothing
+	// else -- no interface, no version.
+	sock := filepath.Join(dir, "wayland-broken")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		c, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		frame := make([]byte, 12)
+		binary.LittleEndian.PutUint32(frame[0:], 2)        // the registry
+		binary.LittleEndian.PutUint32(frame[4:], 12<<16|0) // size 12, opcode global
+		binary.LittleEndian.PutUint32(frame[8:], 33)       // a name
+		c.Write(frame)
+		io.Copy(io.Discard, c) // hold the connection until the client gives up
+	}()
+
+	// A wtype that records what it was asked to type.
+	typed := filepath.Join(dir, "typed")
+	script := "#!/bin/sh\n[ \"$1\" = -- ] && shift\nprintf '%s' \"$*\" > " + typed + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "wtype"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	// Both set, so waylandEnv goes no further than the environment. The
+	// display is an absolute path, which the variable is allowed to hold.
+	t.Setenv("SWAYSOCK", "inherited")
+	t.Setenv("WAYLAND_DISPLAY", sock)
+
+	if err := Type("the dictation", nil); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(typed)
+	if err != nil {
+		t.Fatalf("wtype never ran: %v", err)
+	}
+	if string(b) != "the dictation" {
+		t.Errorf("typed %q", b)
 	}
 }
 

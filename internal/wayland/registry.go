@@ -13,7 +13,10 @@
 // libwayland rather than this.
 package wayland
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Global is one interface the compositor offers. Name is the compositor's
 // numeric handle for it, which is what bind takes.
@@ -85,7 +88,10 @@ func (c *conn) globals(sync uint32) ([]Global, error) {
 		case m.object == registryID && m.opcode == registryGlobalEvent:
 			g, err := decodeGlobal(m.body)
 			if err != nil {
-				return nil, err
+				// The bytes are the only evidence of what the compositor
+				// actually sent, and this has fired in the field on a frame
+				// nothing here could reproduce.
+				return nil, fmt.Errorf("%w (body % x)", err, m.body)
 			}
 			globals = append(globals, g)
 		case m.object == sync && m.opcode == callbackDoneEvent:

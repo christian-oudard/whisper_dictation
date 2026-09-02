@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 
@@ -48,10 +49,12 @@ func Type(text string, typingMethods map[string]string) error {
 	if err := wayland.Insert(display, text); err == nil {
 		return nil
 	} else if !wayland.Unavailable(err) {
-		// The mechanism was there and failed anyway. Typing would probably
-		// work, but silently doing it would hide a broken input method for the
-		// life of the session.
-		return err
+		// The mechanism was there and failed anyway. The dictation still has
+		// a keyboard path, so the text goes on screen; the journal carries
+		// the failure, because a broken input method must stay visible.
+		// Failing the dictation to advertise it was tried, and cost three
+		// dictations in a row to a parse error the fallback typed fine.
+		log.Printf("input method: %v; typing instead", err)
 	}
 	appID, _ := focusedAppID(env)
 	method, ok := typingMethods[appID]

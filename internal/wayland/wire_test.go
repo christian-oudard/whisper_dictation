@@ -142,6 +142,17 @@ func TestGlobalsRejectsAnEmptyGlobal(t *testing.T) {
 	}
 }
 
+// A global that fails to decode has been seen in the field, from a frame this
+// package could not reproduce. The error is the bug report, so it must carry
+// the bytes the compositor sent, not only what was missing from them.
+func TestGlobalsNamesTheBadFrame(t *testing.T) {
+	c, _ := replay(event(registryID, registryGlobalEvent, args{}.uint(33)), done(globalsSyncID))
+	_, err := c.globals(globalsSyncID)
+	if err == nil || !strings.Contains(err.Error(), "21 00 00 00") {
+		t.Errorf("err = %v, want the frame's own bytes in it", err)
+	}
+}
+
 func TestGlobalsReportsAProtocolError(t *testing.T) {
 	body := args{}.uint(displayID).uint(1).str("invalid method")
 	c, _ := replay(event(displayID, displayErrorEvent, body))
