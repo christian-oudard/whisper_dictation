@@ -133,7 +133,10 @@ func (c *compositor) handle(object uint32, opcode uint16, body []byte) {
 
 // serve runs the fake on a unix socket and returns its path, so a test drives
 // the package's real entry points rather than reaching inside them.
-func serve(t *testing.T, c *compositor) string {
+//
+// Each connection gets its own state, since this package opens one per
+// insertion and the ids it allocates start again every time.
+func serve(t testing.TB, c *compositor) string {
 	t.Helper()
 	// Not t.TempDir: it embeds the test's name, and a unix socket path is
 	// capped near 108 bytes, which the names below go past.
@@ -149,37 +152,44 @@ func serve(t *testing.T, c *compositor) string {
 	}
 	t.Cleanup(func() { l.Close() })
 	go func() {
-		conn, err := l.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		buf := make([]byte, 8192)
 		for {
-			n, err := conn.Read(buf)
+			conn, err := l.Accept()
 			if err != nil {
 				return
 			}
-			c.mu.Lock()
-			// A read may carry several requests; each names its own size.
-			for b := buf[:n]; len(b) >= 8; {
-				packed := order.Uint32(b[4:])
-				size := int(packed >> 16)
-				if size < 8 || size > len(b) {
-					break
-				}
-				c.handle(order.Uint32(b), uint16(packed), b[8:size])
-				b = b[size:]
-			}
-			out := c.out.Bytes()
-			c.out = bytes.Buffer{}
-			c.mu.Unlock()
-			if len(out) > 0 {
-				conn.Write(out)
-			}
+			go session(conn, c)
 		}
 	}()
 	return sock
+}
+
+// session answers one connection until the client hangs up.
+func session(conn net.Conn, c *compositor) {
+	defer conn.Close()
+	buf := make([]byte, 8192)
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			return
+		}
+		c.mu.Lock()
+		// A read may carry several requests; each names its own size.
+		for b := buf[:n]; len(b) >= 8; {
+			packed := order.Uint32(b[4:])
+			size := int(packed >> 16)
+			if size < 8 || size > len(b) {
+				break
+			}
+			c.handle(order.Uint32(b), uint16(packed), b[8:size])
+			b = b[size:]
+		}
+		out := c.out.Bytes()
+		c.out = bytes.Buffer{}
+		c.mu.Unlock()
+		if len(out) > 0 {
+			conn.Write(out)
+		}
+	}
 }
 
 // The success path, which nothing tested before: a compositor that offers the
