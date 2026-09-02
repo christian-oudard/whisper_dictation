@@ -106,7 +106,7 @@ func runTranscribe(args []string) {
 
 	path := *out
 	if path == "" {
-		path = strings.TrimSuffix(fs.Arg(0), filepath.Ext(fs.Arg(0))) + ".md"
+		path = strings.TrimSuffix(fs.Arg(0), filepath.Ext(fs.Arg(0))) + "_transcript.md"
 	}
 	// The turns beside the document, because rendering is free and transcribing
 	// is not: a change of mind about how a transcript should look must not cost
@@ -602,6 +602,7 @@ func rerender(path, out string, stamps bool) {
 		log.Fatalf("%s: %v", path, err)
 	}
 	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	title = strings.TrimSuffix(title, "_transcript")
 	if out == "" {
 		out = strings.TrimSuffix(path, filepath.Ext(path)) + ".md"
 	}
