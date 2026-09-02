@@ -133,23 +133,37 @@ func TestReadMsgRejectsATruncatedMessage(t *testing.T) {
 	}
 }
 
-// A global with a well-formed header and nothing in it once walked off the end
-// of a slice. Parsing bytes from another process must fail rather than panic.
-func TestGlobalsRejectsAnEmptyGlobal(t *testing.T) {
-	c, _ := replay(event(registryID, registryGlobalEvent, nil), done(globalsSyncID))
-	if _, err := c.globals(globalsSyncID); err == nil {
-		t.Error("no error")
-	}
-}
-
-// A global that fails to decode has been seen in the field, from a frame this
-// package could not reproduce. The error is the bug report, so it must carry
-// the bytes the compositor sent, not only what was missing from them.
-func TestGlobalsNamesTheBadFrame(t *testing.T) {
-	c, _ := replay(event(registryID, registryGlobalEvent, args{}.uint(33)), done(globalsSyncID))
-	_, err := c.globals(globalsSyncID)
-	if err == nil || !strings.Contains(err.Error(), "21 00 00 00") {
-		t.Errorf("err = %v, want the frame's own bytes in it", err)
+// A global that will not decode is skipped, not fatal. This exchange exists to
+// find two interfaces, and a frame that cannot be read says nothing about
+// whether they are there. Seen in the field as a 4-byte body on a machine
+// running sway, where failing the exchange cost three dictations.
+//
+// Both shapes: nothing at all where a name was due, and a lone word where a
+// name, an interface and a version were.
+func TestGlobalsSkipsAGlobalItCannotDecode(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		bad  []byte
+	}{
+		{"no body", nil},
+		{"one word and nothing after it", args{}.uint(716608)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			conn, _ := replay(
+				globalEvent(1, "wl_seat", 9),
+				event(registryID, registryGlobalEvent, c.bad),
+				globalEvent(2, InputMethod, 1),
+				done(globalsSyncID),
+			)
+			globals, err := conn.globals(globalsSyncID)
+			if err != nil {
+				t.Fatalf("one bad frame failed the whole exchange: %v", err)
+			}
+			// The point of surviving it: what the insertion needs is still found.
+			if !Has(globals, "wl_seat") || !Has(globals, InputMethod) {
+				t.Errorf("got %v, want the globals on either side of the bad frame", globals)
+			}
+		})
 	}
 }
 

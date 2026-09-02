@@ -59,9 +59,9 @@ if [ $# -gt 0 ]; then printf '%s\n' "$*" > "$CLIP"; else cat > "$CLIP"; fi`)
 func TestTypeFallsBackWhenTheInputMethodFails(t *testing.T) {
 	dir := t.TempDir()
 
-	// As much of a compositor as the failure needs: accept, then answer the
-	// handshake with a registry global event carrying a name and nothing
-	// else -- no interface, no version.
+	// As much of a compositor as the failure needs: accept, then refuse with
+	// wl_display.error, which is a real failure of a mechanism that was there
+	// rather than one of the reasons to type instead.
 	sock := filepath.Join(dir, "wayland-broken")
 	l, err := net.Listen("unix", sock)
 	if err != nil {
@@ -74,12 +74,19 @@ func TestTypeFallsBackWhenTheInputMethodFails(t *testing.T) {
 			return
 		}
 		defer c.Close()
-		frame := make([]byte, 12)
-		binary.LittleEndian.PutUint32(frame[0:], 2)        // the registry
-		binary.LittleEndian.PutUint32(frame[4:], 12<<16|0) // size 12, opcode global
-		binary.LittleEndian.PutUint32(frame[8:], 33)       // a name
-		c.Write(frame)
-		io.Copy(io.Discard, c) // hold the connection until the client gives up
+		body := make([]byte, 8)
+		binary.LittleEndian.PutUint32(body[0:], 1) // the object that failed
+		binary.LittleEndian.PutUint32(body[4:], 1) // the code
+		text := "no\x00\x00"                       // a NUL-terminated string, padded to a word
+		body = append(body, 0, 0, 0, 0)
+		binary.LittleEndian.PutUint32(body[8:], 3)
+		body = append(body, text...)
+
+		frame := make([]byte, 8)
+		binary.LittleEndian.PutUint32(frame[0:], 1) // wl_display
+		binary.LittleEndian.PutUint32(frame[4:], uint32(8+len(body))<<16|0)
+		c.Write(append(frame, body...))
+		io.Copy(io.Discard, c)
 	}()
 
 	// A wtype that records what it was asked to type.

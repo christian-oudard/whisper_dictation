@@ -173,6 +173,7 @@ func (c *conn) inputMethodState(sync uint32) (bool, uint32, error) {
 		if err != nil {
 			return false, 0, err
 		}
+		debugf("<- object %d opcode %d, % x", m.object, m.opcode, m.body)
 		switch {
 		case m.object == displayID && m.opcode == displayErrorEvent:
 			return false, 0, protocolError(m.body)

@@ -15,7 +15,8 @@ package wayland
 
 import (
 	"errors"
-	"fmt"
+	"log"
+	"os"
 )
 
 // Global is one interface the compositor offers. Name is the compositor's
@@ -82,16 +83,26 @@ func (c *conn) globals(sync uint32) ([]Global, error) {
 		if err != nil {
 			return nil, err
 		}
+		debugf("<- object %d opcode %d, % x", m.object, m.opcode, m.body)
 		switch {
 		case m.object == displayID && m.opcode == displayErrorEvent:
 			return nil, protocolError(m.body)
 		case m.object == registryID && m.opcode == registryGlobalEvent:
 			g, err := decodeGlobal(m.body)
 			if err != nil {
-				// The bytes are the only evidence of what the compositor
-				// actually sent, and this has fired in the field on a frame
-				// nothing here could reproduce.
-				return nil, fmt.Errorf("%w (body % x)", err, m.body)
+				// Skipped rather than fatal. This asks the compositor which
+				// interfaces it has, and a frame that will not decode is no
+				// evidence about the two being looked for; failing the whole
+				// exchange over one turned a frame nothing here can reproduce
+				// into three lost dictations.
+				//
+				// Seen in the field as a 4-byte body, which is one word where
+				// a name, an interface and a version were due. Loud, because
+				// it should not happen and the bytes are the only account of
+				// what did.
+				log.Printf("wayland: skipping a global that will not decode: %v (object %d, body % x)",
+					err, m.object, m.body)
+				continue
 			}
 			globals = append(globals, g)
 		case m.object == sync && m.opcode == callbackDoneEvent:
@@ -100,6 +111,16 @@ func (c *conn) globals(sync uint32) ([]Global, error) {
 		// Everything else, wl_display.delete_id above all, is bookkeeping for
 		// objects this never creates.
 	}
+}
+
+// debugf logs the frames of an exchange under DIKTAT_DEBUG, spelled like the
+// daemon's other knobs. Off by default: this is per-insertion and every line
+// of it is noise until a compositor sends something unparseable.
+func debugf(format string, v ...any) {
+	if os.Getenv("DIKTAT_DEBUG") == "" {
+		return
+	}
+	log.Printf("wayland: "+format, v...)
 }
 
 // decodeGlobal reads wl_registry.global: name, interface, version.
