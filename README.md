@@ -74,13 +74,12 @@ bindsym XF86HangupPhone exec diktat repeat
 *To-Do*: key bindings for other window managers.
 
 
-## Reporting a bug
+## Transcribing a recording
 
-Run `diktat doctor` from inside your graphical session and include what it
-prints. It reports the compositor, the Wayland protocols that compositor
-offers, which helper programs are installed, and what the speech model would
-run on. Those decide whether diktat can type at all, and they cannot be
-guessed from here.
+First, select and download a transcription pipeline:
+`$ diktat tx-model`
 
-It reports; it does not change anything.
-...
+Then, create a transcript with `$ diktat transcribe <filename>`. This outputs a markdown file, `<filename>_transcript.md`.
+
+By default, the transcription model will attempt to guess how many speakers are present in the recording, but sometimes it gets this wrong. For better accuracy, you can specify the number of speakers:
+`$ diktat transcribe -s 3 <filename>`
