@@ -99,9 +99,17 @@ protocol is `zwp_input_method_manager_v2`, a wlroots one, so KWin and GNOME
 have nothing to answer with; another input method may hold the seat, since
 there may be only one per seat; and the focused window may have no text input
 at all. Each is an ordinary state of a working machine, so `Insert` returns a
-sentinel and the caller types instead. The connection is opened per insertion
-rather than held, because holding it would lock out fcitx5 and ibus for the
-session to save under a millisecond.
+sentinel and the caller types instead. Anything else is a real failure, and it
+is logged and typed through rather than failing the dictation: the input
+method is one mechanism of three, and losing a dictation to advertise that the
+best one is broken is the wrong trade.
+
+The connection is opened per insertion rather than held. Measured at 62 us for
+a whole insertion against 300 ms to transcribe one, so there is nothing to win
+by holding it, and a fresh connection re-resolves the display and survives a
+compositor restart for free. `docs/wayland.md` has the numbers, why this is a
+codec rather than a binding to libwayland, and the day the whole mechanism was
+dead because `get_registry` was a second `sync`.
 
 `diktat doctor` reports which of the three this machine gets, and runs the
 input method handshake rather than inferring it from the advertised protocol.

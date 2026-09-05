@@ -6,7 +6,18 @@ all. That is good evidence about what a compositor implements and no evidence
 at all about what happens when diktat talks to it. This is how to turn one
 into the other.
 
-Nothing here is built.
+Nothing here is built. What *is* built is the layer below it: a fake
+compositor in `internal/wayland/compositor_test.go` that decodes requests and
+answers them, rather than replaying a script. It covers the success path, the
+three reasons to fall back to typing, and the registry listing, in eight
+milliseconds and with no VM.
+
+It is not a substitute for any of this. It answers the way the protocol says
+to, which makes it a check on our reading of the protocol and no evidence at
+all about what a compositor does. It was written after a bug where diktat sent
+a well-formed request that asked for the wrong thing, and sway answered
+correctly; a fake built from the same misreading would have agreed. That is
+exactly the gap a real compositor closes.
 
 
 ## Headless is enough
