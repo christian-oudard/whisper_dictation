@@ -33,7 +33,10 @@ func read(clock uintptr) time.Duration {
 
 // Total is the time this machine has spent suspended since boot. The two
 // clocks are read one syscall apart, so it jitters by microseconds between
-// calls; a suspend is seconds at the least.
+// calls; a suspend is seconds at the least. Monotonic is read first so the
+// gap between the reads biases the result positive: read the other way, a
+// machine that has never suspended reports a small negative total.
 func Total() time.Duration {
-	return read(clockBoottime) - read(clockMonotonic)
+	m := read(clockMonotonic)
+	return read(clockBoottime) - m
 }
